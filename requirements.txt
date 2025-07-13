@@ -1,0 +1,28 @@
+# Python dependencies for the Image Ranking System
+# 
+# This file lists all the external Python packages that your application needs.
+# Users can install all dependencies at once using: pip install -r requirements.txt
+
+# GUI framework (usually comes with Python)
+# tkinter  # Built into Python, no installation needed
+
+# Image processing and display
+Pillow>=9.0.0
+
+# No other external dependencies required!
+# The application uses only Python standard library modules beyond Pillow:
+# - tkinter (GUI framework)
+# - json (data persistence)
+# - os (file system operations)
+# - statistics (mathematical calculations)
+# - datetime (timestamping)
+# - collections (data structures)
+# - typing (type hints)
+# - random (random selection)
+
+# Development dependencies (optional)
+# Uncomment these if you want to contribute to development:
+# pytest>=7.0.0        # For running tests
+# black>=22.0.0         # For code formatting
+# flake8>=4.0.0         # For code linting
+# mypy>=0.950           # For type checking
