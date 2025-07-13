@@ -39,6 +39,8 @@ class StatsWindow:
         self.image_label = None  # For displaying preview images
         self.current_image = None  # Current displayed image reference
         self.image_processor = None  # Will be set when window is created
+        self.resize_timer = None  # Timer for resize debouncing
+        self.current_displayed_image = None  # Track current image for resize refresh
     
     def show(self):
         """Show the statistics window, creating it if necessary."""
@@ -56,19 +58,25 @@ class StatsWindow:
         
         self.window = tk.Toplevel(self.parent)
         self.window.title("Detailed Statistics")
-        self.window.geometry("1200x600")  # Made wider to accommodate image preview
+        self.window.geometry("1600x800")  # Even larger window for optimal preview experience
+        self.window.minsize(1000, 500)  # Set minimum window size to prevent cramped layout
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         # Handle window closing
         self.window.protocol("WM_DELETE_WINDOW", self.close_window)
         
+        # Handle window resize events
+        self.window.bind('<Configure>', self.on_window_resize)
+        self.resize_timer = None
+        self.current_displayed_image = None  # Track current image for resize refresh
+        
         # Create main frame
         main_frame = tk.Frame(self.window, bg=Colors.BG_PRIMARY)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Configure main frame grid
-        main_frame.grid_columnconfigure(0, weight=2)  # Stats take 2/3 of width
-        main_frame.grid_columnconfigure(1, weight=1)  # Image preview takes 1/3 of width
+        # Configure main frame grid - Fixed ratio: 40% stats, 60% image preview
+        main_frame.grid_columnconfigure(0, weight=2, minsize=500)  # Stats take 40% of width
+        main_frame.grid_columnconfigure(1, weight=3, minsize=700)  # Image preview takes 60% of width
         main_frame.grid_rowconfigure(0, weight=1)
         
         # Create notebook for different stats tabs
@@ -89,31 +97,61 @@ class StatsWindow:
         preview_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=2)
         preview_frame.grid(row=0, column=1, sticky="nsew")
         
-        # Title
-        title_label = tk.Label(preview_frame, text="Image Preview", 
-                              font=('Arial', 12, 'bold'), 
-                              fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        title_label.pack(pady=10)
+        # Configure preview frame grid - text areas have fixed minimum sizes
+        preview_frame.grid_columnconfigure(0, weight=1)
+        preview_frame.grid_rowconfigure(0, weight=0, minsize=50)   # Title - fixed
+        preview_frame.grid_rowconfigure(1, weight=1, minsize=400) # Image - expandable with minimum
+        preview_frame.grid_rowconfigure(2, weight=0, minsize=60)  # Info - fixed minimum
+        preview_frame.grid_rowconfigure(3, weight=0, minsize=60)  # Additional stats - fixed minimum
+        preview_frame.grid_rowconfigure(4, weight=0, minsize=120) # Prompt - fixed minimum
         
-        # Image display area
+        # Title - fixed height
+        title_label = tk.Label(preview_frame, text="Image Preview", 
+                              font=('Arial', 14, 'bold'), 
+                              fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY,
+                              height=2)
+        title_label.grid(row=0, column=0, sticky="ew", pady=5)
+        
+        # Image display area - expandable, takes remaining space
         self.image_label = tk.Label(preview_frame, text="Hover over an image\nstatistic to preview", 
                                    bg=Colors.BG_TERTIARY, fg=Colors.TEXT_SECONDARY,
-                                   font=('Arial', 10), justify=tk.CENTER)
-        self.image_label.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+                                   font=('Arial', 12), justify=tk.CENTER)
+        self.image_label.grid(row=1, column=0, sticky="nsew", padx=10, pady=5)
         
-        # Image info label
+        # Image info label - fixed minimum height
         self.image_info_label = tk.Label(preview_frame, text="", 
-                                        font=('Arial', 10), 
+                                        font=('Arial', 11), 
                                         fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY,
-                                        justify=tk.CENTER)
-        self.image_info_label.pack(pady=5)
+                                        justify=tk.CENTER, height=2)
+        self.image_info_label.grid(row=2, column=0, sticky="ew", pady=2)
         
-        # Additional stats label
+        # Additional stats label - fixed minimum height
         self.additional_stats_label = tk.Label(preview_frame, text="", 
-                                             font=('Arial', 9), 
+                                             font=('Arial', 10), 
                                              fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY,
-                                             justify=tk.CENTER)
-        self.additional_stats_label.pack(pady=5)
+                                             justify=tk.CENTER, height=2)
+        self.additional_stats_label.grid(row=3, column=0, sticky="ew", pady=2)
+        
+        # Prompt display area - fixed minimum height
+        prompt_frame = tk.Frame(preview_frame, bg=Colors.BG_SECONDARY)
+        prompt_frame.grid(row=4, column=0, sticky="ew", padx=10, pady=5)
+        prompt_frame.grid_columnconfigure(0, weight=1)
+        prompt_frame.grid_rowconfigure(0, weight=0)
+        prompt_frame.grid_rowconfigure(1, weight=1)
+        
+        # Prompt label
+        tk.Label(prompt_frame, text="Prompt:", font=('Arial', 10, 'bold'), 
+                fg=Colors.TEXT_SUCCESS, bg=Colors.BG_SECONDARY).grid(row=0, column=0, sticky="w")
+        
+        # Scrollable text widget for full prompt - fixed height
+        self.prompt_text = tk.Text(prompt_frame, height=4, wrap=tk.WORD, 
+                                  bg=Colors.BG_TERTIARY, fg=Colors.TEXT_PRIMARY, 
+                                  font=('Arial', 10), relief=tk.FLAT, state=tk.DISABLED)
+        prompt_scrollbar = ttk.Scrollbar(prompt_frame, orient="vertical", command=self.prompt_text.yview)
+        self.prompt_text.configure(yscrollcommand=prompt_scrollbar.set)
+        
+        self.prompt_text.grid(row=1, column=0, sticky="ew", pady=2)
+        prompt_scrollbar.grid(row=1, column=1, sticky="ns")
     
     def create_overall_stats_tab(self, notebook: ttk.Notebook):
         """Create the overall statistics tab."""
@@ -132,7 +170,7 @@ class StatsWindow:
         stats_label.pack(padx=20, pady=20)
         
         # Add instruction text
-        instruction_text = "\nSwitch to 'Image Details' tab and hover over any image frame to see a preview."
+        instruction_text = "\nSwitch to 'Image Details' tab and hover over any image frame to see a large preview."
         instruction_label = tk.Label(frame, text=instruction_text, font=('Arial', 10, 'italic'), 
                                    fg=Colors.TEXT_INFO, bg=Colors.BG_SECONDARY)
         instruction_label.pack(pady=10)
@@ -195,8 +233,23 @@ Tier Distribution:
                  bg=Colors.BUTTON_BG, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
         
         # Add instruction label
-        tk.Label(nav_frame, text="Hover over any image frame to see a preview →", 
+        tk.Label(nav_frame, text="Hover over any image frame to see a large preview →", 
                 font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(side=tk.RIGHT, padx=20)
+    
+    def on_window_resize(self, event):
+        """Handle window resize events with debouncing."""
+        if event.widget == self.window:
+            # Cancel previous timer if it exists
+            if self.resize_timer:
+                self.window.after_cancel(self.resize_timer)
+            
+            # Set a new timer to refresh image after resize stops
+            self.resize_timer = self.window.after(300, self.refresh_current_image)
+    
+    def refresh_current_image(self):
+        """Refresh the currently displayed image with new size."""
+        if self.current_displayed_image:
+            self.display_preview_image(self.current_displayed_image)
     
     def populate_image_details(self, parent: tk.Frame):
         """Populate the image details section."""
@@ -268,17 +321,17 @@ Tier Distribution:
                                   fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         stability_label.pack(anchor=tk.W)
         
-        # Display prompt if available
+        # Display prompt if available - show full prompt
         prompt = stats.get('prompt')
         if prompt:
             prompt_title = tk.Label(parent, text="Prompt:", font=('Arial', 9, 'bold'), 
                                    fg=Colors.TEXT_SUCCESS, bg=Colors.BG_SECONDARY)
             prompt_title.pack(anchor=tk.W)
             
-            # Create a text widget for the prompt
-            prompt_text = tk.Text(parent, height=3, wrap=tk.WORD, 
+            # Create a text widget for the full prompt
+            prompt_text = tk.Text(parent, height=4, wrap=tk.WORD, 
                                 bg=Colors.BG_TERTIARY, fg=Colors.TEXT_PRIMARY, 
-                                font=('Arial', 8), relief=tk.FLAT)
+                                font=('Arial', 9), relief=tk.FLAT)
             prompt_text.insert(1.0, prompt)
             prompt_text.config(state=tk.DISABLED)
             prompt_text.pack(fill=tk.X, padx=10, pady=2)
@@ -304,11 +357,24 @@ Tier Distribution:
             if not os.path.exists(img_path):
                 return
             
-            # Calculate preview size (smaller than main window)
-            preview_width = 250
-            preview_height = 250
+            # Force window to update and get actual dimensions
+            self.window.update_idletasks()
             
-            # Load and resize image
+            # Get the actual size of the image label area after layout
+            label_width = self.image_label.winfo_width()
+            label_height = self.image_label.winfo_height()
+            
+            # Only proceed if we have valid dimensions (widget has been rendered)
+            if label_width <= 1 or label_height <= 1:
+                # Widget not yet rendered, try again after a short delay
+                self.window.after(100, lambda: self.display_preview_image(filename))
+                return
+            
+            # Use almost all available space, leaving small margin, but with reasonable minimums
+            preview_width = max(label_width - 10, 300)
+            preview_height = max(label_height - 10, 300)
+            
+            # Load and resize image to fill the available space
             photo = self.image_processor.load_and_resize_image(
                 img_path, preview_width, preview_height)
             
@@ -319,6 +385,9 @@ Tier Distribution:
                 # Update image display
                 self.image_label.config(image=photo, text="")
                 self.current_image = photo  # Keep reference to prevent garbage collection
+                
+                # Store the current image filename for resize refreshing
+                self.current_displayed_image = filename
                 
                 # Update info labels
                 stats = self.data_manager.get_image_stats(filename)
@@ -335,16 +404,30 @@ Tier Distribution:
                 wins = stats.get('wins', 0)
                 win_rate = wins / votes if votes > 0 else 0
                 
-                additional_text = (f"Win Rate: {win_rate:.1%}\n"
-                                 f"Stability: {stability:.2f}\n"
+                additional_text = (f"Win Rate: {win_rate:.1%} ({wins}/{votes})\n"
+                                 f"Stability: {stability:.2f} | "
                                  f"Last voted: {stats.get('last_voted', 'Never')}")
                 self.additional_stats_label.config(text=additional_text)
+                
+                # Update prompt display with full text
+                prompt = stats.get('prompt', '')
+                self.prompt_text.config(state=tk.NORMAL)
+                self.prompt_text.delete(1.0, tk.END)
+                if prompt:
+                    self.prompt_text.insert(1.0, prompt)
+                else:
+                    self.prompt_text.insert(1.0, "No prompt information available")
+                self.prompt_text.config(state=tk.DISABLED)
                 
             else:
                 # Handle image loading failure
                 self.image_label.config(image="", text="Failed to load image")
                 self.image_info_label.config(text=f"Error loading: {filename}")
                 self.additional_stats_label.config(text="")
+                self.prompt_text.config(state=tk.NORMAL)
+                self.prompt_text.delete(1.0, tk.END)
+                self.prompt_text.insert(1.0, "Error loading image")
+                self.prompt_text.config(state=tk.DISABLED)
                 self.current_image = None
                 
         except Exception as e:
@@ -352,14 +435,26 @@ Tier Distribution:
             self.image_label.config(image="", text="Error loading image")
             self.image_info_label.config(text=f"Error: {filename}")
             self.additional_stats_label.config(text="")
+            self.prompt_text.config(state=tk.NORMAL)
+            self.prompt_text.delete(1.0, tk.END)
+            self.prompt_text.insert(1.0, "Error loading image")
+            self.prompt_text.config(state=tk.DISABLED)
             self.current_image = None
     
     def close_window(self):
         """Handle window closing."""
+        # Cancel any pending resize timer
+        if self.resize_timer:
+            self.window.after_cancel(self.resize_timer)
+        
         # Clear image references
         self.current_image = None
+        self.current_displayed_image = None
         if self.image_label:
             self.image_label.config(image="")
+        if hasattr(self, 'prompt_text') and self.prompt_text:
+            self.prompt_text.config(state=tk.NORMAL)
+            self.prompt_text.delete(1.0, tk.END)
         
         # Clean up image processor
         if self.image_processor:

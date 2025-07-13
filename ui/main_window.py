@@ -43,6 +43,7 @@ class MainWindow:
         self.root = root
         self.root.title("Image Ranking System")
         self.root.geometry(f"{Defaults.WINDOW_WIDTH}x{Defaults.WINDOW_HEIGHT}")
+        self.root.minsize(800, 600)  # Set minimum window size to prevent cramped layout
         self.root.configure(bg=Colors.BG_PRIMARY)
         
         # Initialize core components
@@ -174,11 +175,11 @@ class MainWindow:
         main_frame = tk.Frame(self.root, bg=Colors.BG_PRIMARY)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Configure grid weights for equal distribution
-        main_frame.grid_columnconfigure(0, weight=1, uniform="equal")
-        main_frame.grid_columnconfigure(1, weight=0)  # VS label column
-        main_frame.grid_columnconfigure(2, weight=1, uniform="equal")
-        main_frame.grid_rowconfigure(0, weight=1)
+        # Configure grid weights for equal distribution with minimum sizes
+        main_frame.grid_columnconfigure(0, weight=1, uniform="equal", minsize=400)
+        main_frame.grid_columnconfigure(1, weight=0, minsize=80)  # VS label column
+        main_frame.grid_columnconfigure(2, weight=1, uniform="equal", minsize=400)
+        main_frame.grid_rowconfigure(0, weight=1, minsize=500)
         
         # Create left and right image frames
         self.create_image_frame(main_frame, 'left', 0)
@@ -190,30 +191,37 @@ class MainWindow:
         frame = tk.Frame(parent, relief=tk.RAISED, borderwidth=2, bg=Colors.BG_SECONDARY)
         frame.grid(row=0, column=column, sticky="nsew", padx=5)
         
-        # Image display label
+        # Configure frame grid - text areas have fixed minimum sizes
+        frame.grid_columnconfigure(0, weight=1)
+        frame.grid_rowconfigure(0, weight=1, minsize=400)     # Image - expandable with minimum
+        frame.grid_rowconfigure(1, weight=0, minsize=30)     # Info - fixed minimum
+        frame.grid_rowconfigure(2, weight=0, minsize=60)     # Metadata - fixed minimum
+        frame.grid_rowconfigure(3, weight=0, minsize=60)     # Vote button - fixed minimum
+        
+        # Image display label - expandable, takes most space
         image_label = tk.Label(frame, text="No image", 
                               bg=Colors.BG_TERTIARY, fg=Colors.TEXT_PRIMARY, cursor="hand2")
-        image_label.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        image_label.grid(row=0, column=0, sticky="nsew", padx=10, pady=10)
         image_label.bind("<Button-1>", lambda e: self.vote(side))
         
-        # Info label showing stats
+        # Info label showing stats - fixed minimum height
         info_label = tk.Label(frame, text="", font=('Arial', 10), 
-                             fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        info_label.pack(pady=5)
+                             fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY, height=2)
+        info_label.grid(row=1, column=0, sticky="ew", pady=2)
         
-        # Metadata label - larger font for better readability, with text wrapping
+        # Metadata label - fixed minimum height with text wrapping
         metadata_label = tk.Label(frame, text="", font=('Arial', 10), 
                                  fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, 
-                                 justify=tk.LEFT)
-        metadata_label.pack(pady=2, fill=tk.X, padx=10)
+                                 justify=tk.LEFT, height=3)
+        metadata_label.grid(row=2, column=0, sticky="ew", padx=10, pady=2)
         
-        # Vote button
+        # Vote button - fixed height
         arrow = "←" if side == 'left' else "→"
         vote_button = tk.Button(frame, text=f"Vote for this image ({arrow})", 
                                command=lambda: self.vote(side), 
                                state=tk.DISABLED, font=('Arial', 12, 'bold'),
                                bg=Colors.BUTTON_SUCCESS, fg='white', height=2, relief=tk.FLAT)
-        vote_button.pack(fill=tk.X, padx=10, pady=10)
+        vote_button.grid(row=3, column=0, sticky="ew", padx=10, pady=10)
         
         # Store references
         if side == 'left':
@@ -422,14 +430,28 @@ class MainWindow:
         try:
             img_path = os.path.join(self.data_manager.image_folder, filename)
             
-            # Calculate display dimensions
+            # Force window to update and get actual dimensions
             self.root.update_idletasks()
-            window_width = self.root.winfo_width()
-            window_height = self.root.winfo_height()
-            max_image_width = max((window_width - 150) // 2, Defaults.MIN_IMAGE_WIDTH)
-            max_image_height = max(window_height - 300, Defaults.MIN_IMAGE_HEIGHT)
             
-            # Load and resize image
+            # Get the actual size of the image label area after layout
+            if side == 'left':
+                label_width = self.left_image_label.winfo_width()
+                label_height = self.left_image_label.winfo_height()
+            else:
+                label_width = self.right_image_label.winfo_width()
+                label_height = self.right_image_label.winfo_height()
+            
+            # Only proceed if we have valid dimensions (widget has been rendered)
+            if label_width <= 1 or label_height <= 1:
+                # Widget not yet rendered, try again after a short delay
+                self.root.after(100, lambda: self.display_image(filename, side))
+                return
+            
+            # Use almost all available space, leaving small margin, but with reasonable minimums
+            max_image_width = max(label_width - 20, 300)
+            max_image_height = max(label_height - 20, 300)
+            
+            # Load and resize image to fill the available space
             photo = self.image_processor.load_and_resize_image(
                 img_path, max_image_width, max_image_height)
             
