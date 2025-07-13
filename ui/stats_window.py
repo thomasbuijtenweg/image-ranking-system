@@ -3,12 +3,13 @@ Statistics window module for the Image Ranking System.
 
 This module implements the detailed statistics window that shows
 comprehensive information about individual images and overall
-system performance.
+system performance. Now includes image preview functionality on hover.
 """
 
 import tkinter as tk
 from tkinter import ttk
 from collections import defaultdict
+import os
 
 from config import Colors
 
@@ -18,7 +19,8 @@ class StatsWindow:
     Window for displaying detailed statistics about the ranking system.
     
     This window provides comprehensive statistics about individual images,
-    overall system performance, and priority calculations.
+    overall system performance, and priority calculations. Now includes
+    image preview on hover.
     """
     
     def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm):
@@ -34,6 +36,9 @@ class StatsWindow:
         self.data_manager = data_manager
         self.ranking_algorithm = ranking_algorithm
         self.window = None
+        self.image_label = None  # For displaying preview images
+        self.current_image = None  # Current displayed image reference
+        self.image_processor = None  # Will be set when window is created
     
     def show(self):
         """Show the statistics window, creating it if necessary."""
@@ -45,23 +50,70 @@ class StatsWindow:
     
     def create_window(self):
         """Create the statistics window with all its components."""
+        # Import here to avoid circular imports
+        from core.image_processor import ImageProcessor
+        self.image_processor = ImageProcessor()
+        
         self.window = tk.Toplevel(self.parent)
         self.window.title("Detailed Statistics")
-        self.window.geometry("900x600")
+        self.window.geometry("1200x600")  # Made wider to accommodate image preview
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         # Handle window closing
         self.window.protocol("WM_DELETE_WINDOW", self.close_window)
         
+        # Create main frame
+        main_frame = tk.Frame(self.window, bg=Colors.BG_PRIMARY)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Configure main frame grid
+        main_frame.grid_columnconfigure(0, weight=2)  # Stats take 2/3 of width
+        main_frame.grid_columnconfigure(1, weight=1)  # Image preview takes 1/3 of width
+        main_frame.grid_rowconfigure(0, weight=1)
+        
         # Create notebook for different stats tabs
-        notebook = ttk.Notebook(self.window)
-        notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        notebook = ttk.Notebook(main_frame)
+        notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        
+        # Create image preview area
+        self.create_image_preview_area(main_frame)
         
         # Create overall statistics tab
         self.create_overall_stats_tab(notebook)
         
         # Create individual image details tab
         self.create_image_details_tab(notebook)
+    
+    def create_image_preview_area(self, parent):
+        """Create the image preview area on the right side."""
+        preview_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=2)
+        preview_frame.grid(row=0, column=1, sticky="nsew")
+        
+        # Title
+        title_label = tk.Label(preview_frame, text="Image Preview", 
+                              font=('Arial', 12, 'bold'), 
+                              fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
+        title_label.pack(pady=10)
+        
+        # Image display area
+        self.image_label = tk.Label(preview_frame, text="Hover over an image\nstatistic to preview", 
+                                   bg=Colors.BG_TERTIARY, fg=Colors.TEXT_SECONDARY,
+                                   font=('Arial', 10), justify=tk.CENTER)
+        self.image_label.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Image info label
+        self.image_info_label = tk.Label(preview_frame, text="", 
+                                        font=('Arial', 10), 
+                                        fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY,
+                                        justify=tk.CENTER)
+        self.image_info_label.pack(pady=5)
+        
+        # Additional stats label
+        self.additional_stats_label = tk.Label(preview_frame, text="", 
+                                             font=('Arial', 9), 
+                                             fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY,
+                                             justify=tk.CENTER)
+        self.additional_stats_label.pack(pady=5)
     
     def create_overall_stats_tab(self, notebook: ttk.Notebook):
         """Create the overall statistics tab."""
@@ -75,8 +127,15 @@ class StatsWindow:
         stats_text = self.format_overall_stats(overall_stats)
         
         # Display statistics
-        tk.Label(frame, text=stats_text, font=('Courier', 12), justify=tk.LEFT, 
-                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(padx=20, pady=20)
+        stats_label = tk.Label(frame, text=stats_text, font=('Courier', 12), justify=tk.LEFT, 
+                              fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
+        stats_label.pack(padx=20, pady=20)
+        
+        # Add instruction text
+        instruction_text = "\nSwitch to 'Image Details' tab and hover over any image frame to see a preview."
+        instruction_label = tk.Label(frame, text=instruction_text, font=('Arial', 10, 'italic'), 
+                                   fg=Colors.TEXT_INFO, bg=Colors.BG_SECONDARY)
+        instruction_label.pack(pady=10)
     
     def format_overall_stats(self, stats: dict) -> str:
         """Format overall statistics for display."""
@@ -134,10 +193,19 @@ Tier Distribution:
                  bg=Colors.BUTTON_BG, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
         tk.Button(nav_frame, text="Jump to Bottom", command=jump_to_bottom, 
                  bg=Colors.BUTTON_BG, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
+        # Add instruction label
+        tk.Label(nav_frame, text="Hover over any image frame to see a preview →", 
+                font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(side=tk.RIGHT, padx=20)
     
     def populate_image_details(self, parent: tk.Frame):
         """Populate the image details section."""
-        for img in sorted(self.data_manager.image_stats.keys()):
+        # Sort images by current tier (descending) for better organization
+        sorted_images = sorted(self.data_manager.image_stats.keys(), 
+                              key=lambda x: self.data_manager.get_image_stats(x).get('current_tier', 0), 
+                              reverse=True)
+        
+        for img in sorted_images:
             stats = self.data_manager.get_image_stats(img)
             
             # Create frame for this image
@@ -148,8 +216,33 @@ Tier Distribution:
                                     highlightthickness=1, relief=tk.RIDGE, bd=1)
             img_frame.pack(fill=tk.X, padx=10, pady=5)
             
+            # Add hover functionality to the frame
+            self.add_hover_to_frame(img_frame, img)
+            
             # Add image statistics
             self.add_image_statistics(img_frame, img, stats)
+    
+    def add_hover_to_frame(self, frame: tk.Frame, image_filename: str):
+        """Add hover functionality to a frame and all its children."""
+        def on_enter(event):
+            self.display_preview_image(image_filename)
+            frame.configure(highlightbackground=Colors.BUTTON_HOVER)
+        
+        def on_leave(event):
+            frame.configure(highlightbackground=Colors.BUTTON_BG)
+        
+        # Bind to the frame itself
+        frame.bind("<Enter>", on_enter)
+        frame.bind("<Leave>", on_leave)
+        
+        # Also bind to all child widgets
+        def bind_to_children(widget):
+            for child in widget.winfo_children():
+                child.bind("<Enter>", on_enter)
+                child.bind("<Leave>", on_leave)
+                bind_to_children(child)
+        
+        bind_to_children(frame)
     
     def add_image_statistics(self, parent: tk.Frame, img: str, stats: dict):
         """Add statistics for a single image."""
@@ -158,25 +251,29 @@ Tier Distribution:
                      f"Votes: {stats.get('votes', 0)} | "
                      f"Wins: {stats.get('wins', 0)} | "
                      f"Losses: {stats.get('losses', 0)}")
-        tk.Label(parent, text=basic_text, fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        basic_label = tk.Label(parent, text=basic_text, fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
+        basic_label.pack(anchor=tk.W)
         
         # Win rate
         votes = stats.get('votes', 0)
         wins = stats.get('wins', 0)
         win_rate = wins / votes if votes > 0 else 0
-        tk.Label(parent, text=f"Win Rate: {win_rate:.1%}", 
-                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        win_rate_label = tk.Label(parent, text=f"Win Rate: {win_rate:.1%}", 
+                                 fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
+        win_rate_label.pack(anchor=tk.W)
         
         # Tier stability
         stability = self.ranking_algorithm._calculate_tier_stability(img)
-        tk.Label(parent, text=f"Tier Stability (std dev): {stability:.2f}", 
-                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        stability_label = tk.Label(parent, text=f"Tier Stability (std dev): {stability:.2f}", 
+                                  fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
+        stability_label.pack(anchor=tk.W)
         
         # Display prompt if available
         prompt = stats.get('prompt')
         if prompt:
-            tk.Label(parent, text="Prompt:", font=('Arial', 9, 'bold'), 
-                    fg=Colors.TEXT_SUCCESS, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+            prompt_title = tk.Label(parent, text="Prompt:", font=('Arial', 9, 'bold'), 
+                                   fg=Colors.TEXT_SUCCESS, bg=Colors.BG_SECONDARY)
+            prompt_title.pack(anchor=tk.W)
             
             # Create a text widget for the prompt
             prompt_text = tk.Text(parent, height=3, wrap=tk.WORD, 
@@ -193,11 +290,81 @@ Tier Distribution:
             for opponent, won, _ in matchup_history[-5:]:
                 result = "W" if won else "L"
                 recent_text += f"{result} vs {opponent}, "
-            tk.Label(parent, text=recent_text[:-2], font=('Arial', 9), 
-                    fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+            recent_label = tk.Label(parent, text=recent_text[:-2], font=('Arial', 9), 
+                                   fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
+            recent_label.pack(anchor=tk.W)
+    
+    def display_preview_image(self, filename: str):
+        """Display a preview image in the preview area."""
+        if not filename or not self.data_manager.image_folder:
+            return
+        
+        try:
+            img_path = os.path.join(self.data_manager.image_folder, filename)
+            if not os.path.exists(img_path):
+                return
+            
+            # Calculate preview size (smaller than main window)
+            preview_width = 250
+            preview_height = 250
+            
+            # Load and resize image
+            photo = self.image_processor.load_and_resize_image(
+                img_path, preview_width, preview_height)
+            
+            if photo:
+                # Clear old image reference
+                self.current_image = None
+                
+                # Update image display
+                self.image_label.config(image=photo, text="")
+                self.current_image = photo  # Keep reference to prevent garbage collection
+                
+                # Update info labels
+                stats = self.data_manager.get_image_stats(filename)
+                
+                # Basic info
+                info_text = (f"{filename}\n"
+                            f"Tier: {stats.get('current_tier', 0)} | "
+                            f"Votes: {stats.get('votes', 0)}")
+                self.image_info_label.config(text=info_text)
+                
+                # Additional stats
+                stability = self.ranking_algorithm._calculate_tier_stability(filename)
+                votes = stats.get('votes', 0)
+                wins = stats.get('wins', 0)
+                win_rate = wins / votes if votes > 0 else 0
+                
+                additional_text = (f"Win Rate: {win_rate:.1%}\n"
+                                 f"Stability: {stability:.2f}\n"
+                                 f"Last voted: {stats.get('last_voted', 'Never')}")
+                self.additional_stats_label.config(text=additional_text)
+                
+            else:
+                # Handle image loading failure
+                self.image_label.config(image="", text="Failed to load image")
+                self.image_info_label.config(text=f"Error loading: {filename}")
+                self.additional_stats_label.config(text="")
+                self.current_image = None
+                
+        except Exception as e:
+            print(f"Error displaying preview for {filename}: {e}")
+            self.image_label.config(image="", text="Error loading image")
+            self.image_info_label.config(text=f"Error: {filename}")
+            self.additional_stats_label.config(text="")
+            self.current_image = None
     
     def close_window(self):
         """Handle window closing."""
+        # Clear image references
+        self.current_image = None
+        if self.image_label:
+            self.image_label.config(image="")
+        
+        # Clean up image processor
+        if self.image_processor:
+            self.image_processor.cleanup_resources()
+        
         if self.window:
             self.window.destroy()
             self.window = None

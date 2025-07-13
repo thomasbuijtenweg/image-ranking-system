@@ -57,7 +57,8 @@ class ImageProcessor:
         Load an image and resize it to fit within the specified dimensions.
         
         This method maintains the aspect ratio of the image while ensuring
-        it fits within the given bounds.
+        it fits within the given bounds. Uses proper resource management
+        to prevent memory leaks.
         
         Args:
             image_path: Path to the image file
@@ -68,24 +69,25 @@ class ImageProcessor:
             PhotoImage object ready for display, or None if loading fails
         """
         try:
-            # Load the image
-            img = Image.open(image_path)
-            
-            # Calculate scaling factor to fit within bounds
-            img_width, img_height = img.size
-            width_ratio = max_width / img_width
-            height_ratio = max_height / img_height
-            scale_factor = min(width_ratio, height_ratio)
-            
-            # Calculate new dimensions
-            new_width = int(img_width * scale_factor)
-            new_height = int(img_height * scale_factor)
-            
-            # Resize image maintaining aspect ratio
-            img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
-            
-            # Convert to PhotoImage for tkinter
-            return ImageTk.PhotoImage(img)
+            # Use context manager to ensure proper cleanup
+            with Image.open(image_path) as img:
+                # Calculate scaling factor to fit within bounds
+                img_width, img_height = img.size
+                width_ratio = max_width / img_width
+                height_ratio = max_height / img_height
+                scale_factor = min(width_ratio, height_ratio)
+                
+                # Calculate new dimensions
+                new_width = int(img_width * scale_factor)
+                new_height = int(img_height * scale_factor)
+                
+                # Resize image maintaining aspect ratio
+                # Create a copy to avoid issues with the context manager
+                resized_img = img.resize((new_width, new_height), Image.Resampling.LANCZOS)
+                
+                # Convert to PhotoImage for tkinter
+                # Note: We need to keep the resized image in memory for PhotoImage
+                return ImageTk.PhotoImage(resized_img)
             
         except Exception as e:
             print(f"Error loading image {image_path}: {e}")
@@ -97,6 +99,7 @@ class ImageProcessor:
         
         This method checks multiple metadata sources commonly used by
         AI image generation tools to store prompt information.
+        Uses proper resource management to prevent memory leaks.
         
         Args:
             image_path: Path to the image file
@@ -105,28 +108,31 @@ class ImageProcessor:
             Extracted prompt string, or None if not found
         """
         try:
-            img = Image.open(image_path)
-            
-            # Method 1: PNG text chunks (most common for AI-generated images)
-            if img.format == 'PNG' and hasattr(img, 'text'):
-                prompt = self._extract_from_png_text(img.text)
-                if prompt:
-                    return prompt
-            
-            # Method 2: PIL info dictionary
-            if hasattr(img, 'info'):
-                prompt = self._extract_from_pil_info(img.info)
-                if prompt:
-                    return prompt
-            
-            # Method 3: EXIF data
-            exifdata = img.getexif()
-            if exifdata:
-                prompt = self._extract_from_exif(exifdata)
-                if prompt:
-                    return prompt
-            
-            return None
+            # Use context manager to ensure proper cleanup
+            with Image.open(image_path) as img:
+                # Method 1: PNG text chunks (most common for AI-generated images)
+                if img.format == 'PNG' and hasattr(img, 'text'):
+                    prompt = self._extract_from_png_text(img.text)
+                    if prompt:
+                        return prompt
+                
+                # Method 2: PIL info dictionary
+                if hasattr(img, 'info'):
+                    prompt = self._extract_from_pil_info(img.info)
+                    if prompt:
+                        return prompt
+                
+                # Method 3: EXIF data
+                try:
+                    exifdata = img.getexif()
+                    if exifdata:
+                        prompt = self._extract_from_exif(exifdata)
+                        if prompt:
+                            return prompt
+                except Exception as exif_error:
+                    print(f"Error reading EXIF data from {image_path}: {exif_error}")
+                
+                return None
             
         except Exception as e:
             print(f"Error extracting prompt from {image_path}: {e}")
@@ -208,6 +214,7 @@ class ImageProcessor:
         
         This method extracts various metadata fields and formats them
         into a readable string for display in the user interface.
+        Uses proper resource management to prevent memory leaks.
         
         Args:
             image_path: Path to the image file
@@ -218,29 +225,33 @@ class ImageProcessor:
         metadata_lines = []
         
         try:
-            img = Image.open(image_path)
-            
-            # Basic image information
-            metadata_lines.append(f"Size: {img.width} × {img.height}")
-            metadata_lines.append(f"Format: {img.format}")
-            metadata_lines.append(f"Mode: {img.mode}")
-            
-            # File size
-            file_size = os.path.getsize(image_path)
-            size_str = self._format_file_size(file_size)
-            metadata_lines.append(f"File size: {size_str}")
-            
-            # Extract EXIF data for camera information
-            exifdata = img.getexif()
-            if exifdata:
-                self._add_exif_metadata(exifdata, metadata_lines)
-            
-            # Limit number of lines displayed
-            if len(metadata_lines) > 10:
-                metadata_lines = metadata_lines[:10]
-                metadata_lines.append("...")
-            
-            return '\n'.join(metadata_lines)
+            # Use context manager to ensure proper cleanup
+            with Image.open(image_path) as img:
+                # Basic image information
+                metadata_lines.append(f"Size: {img.width} × {img.height}")
+                metadata_lines.append(f"Format: {img.format}")
+                metadata_lines.append(f"Mode: {img.mode}")
+                
+                # File size
+                file_size = os.path.getsize(image_path)
+                size_str = self._format_file_size(file_size)
+                metadata_lines.append(f"File size: {size_str}")
+                
+                # Extract EXIF data for camera information
+                try:
+                    exifdata = img.getexif()
+                    if exifdata:
+                        self._add_exif_metadata(exifdata, metadata_lines)
+                except Exception as exif_error:
+                    print(f"Error reading EXIF data from {image_path}: {exif_error}")
+                    metadata_lines.append("EXIF data unavailable")
+                
+                # Limit number of lines displayed
+                if len(metadata_lines) > 10:
+                    metadata_lines = metadata_lines[:10]
+                    metadata_lines.append("...")
+                
+                return '\n'.join(metadata_lines)
             
         except Exception as e:
             return f"Error reading metadata: {str(e)}"
@@ -313,28 +324,30 @@ class ImageProcessor:
         """
         try:
             if tag == 'ExposureTime':
-                if isinstance(value, tuple):
+                if isinstance(value, tuple) and len(value) == 2:
                     return f"{value[0]}/{value[1]}s"
                 else:
                     return f"{value}s"
             elif tag == 'FNumber':
-                if isinstance(value, tuple):
+                if isinstance(value, tuple) and len(value) == 2:
                     return f"f/{float(value[0])/float(value[1]):.1f}"
                 else:
                     return f"f/{value}"
             elif tag == 'FocalLength':
-                if isinstance(value, tuple):
+                if isinstance(value, tuple) and len(value) == 2:
                     return f"{float(value[0])/float(value[1]):.1f}mm"
                 else:
                     return f"{value}mm"
             else:
                 return str(value)
-        except:
+        except (ValueError, ZeroDivisionError, TypeError):
             return str(value)
     
     def validate_image_file(self, image_path: str) -> bool:
         """
         Validate that a file is a readable image.
+        
+        Uses proper resource management to prevent memory leaks.
         
         Args:
             image_path: Path to the image file
@@ -343,7 +356,9 @@ class ImageProcessor:
             True if the file is a valid image, False otherwise
         """
         try:
+            # Use context manager to ensure proper cleanup
             with Image.open(image_path) as img:
+                # Verify the image can be processed
                 img.verify()
             return True
         except Exception:
@@ -353,6 +368,8 @@ class ImageProcessor:
         """
         Get the dimensions of an image without fully loading it.
         
+        Uses proper resource management to prevent memory leaks.
+        
         Args:
             image_path: Path to the image file
             
@@ -360,7 +377,19 @@ class ImageProcessor:
             Tuple of (width, height) or None if unable to read
         """
         try:
+            # Use context manager to ensure proper cleanup
             with Image.open(image_path) as img:
                 return img.size
         except Exception:
             return None
+    
+    def cleanup_resources(self):
+        """
+        Clean up any resources held by the image processor.
+        
+        This method can be called when the image processor is no longer needed
+        to ensure all resources are properly released.
+        """
+        # Currently no persistent resources to clean up, but this method
+        # provides a hook for future resource management needs
+        pass

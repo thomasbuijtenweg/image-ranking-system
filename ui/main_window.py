@@ -13,6 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import Optional, Tuple
 import os
+import gc
 
 from config import Colors, Defaults, KeyBindings
 from core.data_manager import DataManager
@@ -55,6 +56,9 @@ class MainWindow:
         self.next_pair_images = {'left': None, 'right': None}
         self.previous_pair = (None, None)
         
+        # Current displayed images (keep references to prevent garbage collection)
+        self.current_images = {'left': None, 'right': None}
+        
         # Window references to prevent multiple instances
         self.rankings_window = None
         self.stats_window = None
@@ -62,6 +66,7 @@ class MainWindow:
         
         # Timer references
         self.resize_timer = None
+        self.preload_timer = None
         
         # Setup the user interface
         self.setup_dark_theme()
@@ -70,6 +75,21 @@ class MainWindow:
         
         # Bind window events
         self.root.bind('<Configure>', self.on_window_resize)
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        
+        # Handle platform-specific window maximization
+        self.maximize_window()
+    
+    def maximize_window(self):
+        """Maximize the window in a platform-independent way."""
+        try:
+            self.root.state('zoomed')  # Windows
+        except tk.TclError:
+            try:
+                self.root.attributes('-zoomed', True)  # Linux
+            except tk.TclError:
+                # macOS or other platforms - just make it large
+                self.root.geometry("1200x800")
     
     def setup_dark_theme(self):
         """Configure ttk styles for dark mode."""
@@ -181,10 +201,11 @@ class MainWindow:
                              fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         info_label.pack(pady=5)
         
-        # Metadata label
-        metadata_label = tk.Label(frame, text="", font=('Arial', 8), 
-                                 fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, justify=tk.LEFT)
-        metadata_label.pack(pady=2)
+        # Metadata label - larger font for better readability, with text wrapping
+        metadata_label = tk.Label(frame, text="", font=('Arial', 10), 
+                                 fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, 
+                                 justify=tk.LEFT)
+        metadata_label.pack(pady=2, fill=tk.X, padx=10)
         
         # Vote button
         arrow = "←" if side == 'left' else "→"
@@ -260,10 +281,26 @@ class MainWindow:
             self.display_image(self.current_pair[0], 'left')
             self.display_image(self.current_pair[1], 'right')
     
+    def clear_old_images(self):
+        """Clear old image references to help with garbage collection."""
+        # Clear current displayed images
+        self.current_images['left'] = None
+        self.current_images['right'] = None
+        
+        # Clear preloaded images
+        self.next_pair_images['left'] = None
+        self.next_pair_images['right'] = None
+        
+        # Force garbage collection
+        gc.collect()
+    
     def select_folder(self):
         """Handle folder selection for image loading."""
         folder = filedialog.askdirectory(title="Select folder containing images")
         if folder:
+            # Clear old images before loading new ones
+            self.clear_old_images()
+            
             self.data_manager.image_folder = folder
             self.load_images()
     
@@ -287,9 +324,12 @@ class MainWindow:
             stats = self.data_manager.get_image_stats(img)
             if stats.get('prompt') is None:
                 img_path = os.path.join(self.data_manager.image_folder, img)
-                prompt = self.image_processor.extract_prompt_from_image(img_path)
-                metadata = self.image_processor.get_image_metadata(img_path)
-                self.data_manager.set_image_metadata(img, prompt, metadata)
+                try:
+                    prompt = self.image_processor.extract_prompt_from_image(img_path)
+                    metadata = self.image_processor.get_image_metadata(img_path)
+                    self.data_manager.set_image_metadata(img, prompt, metadata)
+                except Exception as e:
+                    print(f"Error extracting metadata from {img}: {e}")
         
         # Update status and show first pair
         self.status_bar.config(text=f"Loaded {len(images)} images. Click images or use arrow keys (←/→) to vote.")
@@ -304,6 +344,9 @@ class MainWindow:
         images = self.image_processor.get_image_files(self.data_manager.image_folder)
         if len(images) < 2:
             return
+        
+        # Clear old images before loading new ones
+        self.clear_old_images()
         
         # Store current pair as previous
         if self.current_pair[0] and self.current_pair[1]:
@@ -328,8 +371,12 @@ class MainWindow:
         explanation = self.ranking_algorithm.get_selection_explanation(img1, img2)
         self.status_bar.config(text=explanation)
         
+        # Cancel any existing preload timer
+        if self.preload_timer:
+            self.root.after_cancel(self.preload_timer)
+        
         # Preload next pair in background
-        self.root.after(Defaults.PRELOAD_DELAY_MS, self.preload_next_pair)
+        self.preload_timer = self.root.after(Defaults.PRELOAD_DELAY_MS, self.preload_next_pair)
     
     def preload_next_pair(self):
         """Preload the next pair of images in the background."""
@@ -347,15 +394,15 @@ class MainWindow:
             # Clear old preloaded images
             self.next_pair_images = {'left': None, 'right': None}
             
-            # Calculate display dimensions
-            self.root.update_idletasks()
-            window_width = self.root.winfo_width()
-            window_height = self.root.winfo_height()
-            max_image_width = max((window_width - 150) // 2, Defaults.MIN_IMAGE_WIDTH)
-            max_image_height = max(window_height - 300, Defaults.MIN_IMAGE_HEIGHT)
-            
-            # Preload images
             try:
+                # Calculate display dimensions
+                self.root.update_idletasks()
+                window_width = self.root.winfo_width()
+                window_height = self.root.winfo_height()
+                max_image_width = max((window_width - 150) // 2, Defaults.MIN_IMAGE_WIDTH)
+                max_image_height = max(window_height - 300, Defaults.MIN_IMAGE_HEIGHT)
+                
+                # Preload images
                 for idx, filename in enumerate(self.next_pair):
                     img_path = os.path.join(self.data_manager.image_folder, filename)
                     photo = self.image_processor.load_and_resize_image(
@@ -364,8 +411,11 @@ class MainWindow:
                     if photo:
                         side = 'left' if idx == 0 else 'right'
                         self.next_pair_images[side] = photo
+                        
             except Exception as e:
                 print(f"Error preloading images: {e}")
+                # Clear partially loaded images to prevent memory issues
+                self.next_pair_images = {'left': None, 'right': None}
     
     def display_image(self, filename: str, side: str):
         """Display an image on the specified side."""
@@ -387,16 +437,34 @@ class MainWindow:
                 # Update image display
                 if side == 'left':
                     self.left_image_label.config(image=photo, text="")
-                    self.left_image_label.image = photo  # Keep reference
+                    self.current_images['left'] = photo  # Keep reference
                 else:
                     self.right_image_label.config(image=photo, text="")
-                    self.right_image_label.image = photo  # Keep reference
+                    self.current_images['right'] = photo  # Keep reference
                 
                 # Update info and metadata
                 self.update_image_info(filename, side)
+            else:
+                # Handle image loading failure
+                if side == 'left':
+                    self.left_image_label.config(image="", text="Failed to load image")
+                    self.current_images['left'] = None
+                else:
+                    self.right_image_label.config(image="", text="Failed to load image")
+                    self.current_images['right'] = None
             
         except Exception as e:
-            messagebox.showerror("Error", f"Could not load image {filename}: {str(e)}")
+            error_msg = f"Could not load image {filename}: {str(e)}"
+            print(error_msg)
+            messagebox.showerror("Error", error_msg)
+            
+            # Clear the image display for this side
+            if side == 'left':
+                self.left_image_label.config(image="", text="Error loading image")
+                self.current_images['left'] = None
+            else:
+                self.right_image_label.config(image="", text="Error loading image")
+                self.current_images['right'] = None
     
     def update_image_info(self, filename: str, side: str):
         """Update the info and metadata labels for an image."""
@@ -411,27 +479,43 @@ class MainWindow:
                     f"Losses: {stats.get('losses', 0)} | "
                     f"Stability: {stability:.2f}")
         
-        # Get prompt or metadata for display
+        # Get prompt or metadata for display - show full prompt
         prompt = stats.get('prompt')
         metadata = stats.get('display_metadata')
         
         if prompt:
-            display_text = prompt
-            if len(display_text) > Defaults.MAX_PROMPT_DISPLAY_LENGTH:
-                display_text = display_text[:Defaults.MAX_PROMPT_DISPLAY_LENGTH] + "..."
-            metadata_text = f"Prompt: {display_text}"
+            # Show full prompt with better formatting
+            metadata_text = f"Prompt: {prompt}"
         elif metadata:
             metadata_text = metadata
         else:
             metadata_text = "No prompt found"
         
-        # Update labels
+        # Update labels with dynamic wraplength
         if side == 'left':
             self.left_info_label.config(text=info_text)
-            self.left_metadata_label.config(text=metadata_text)
+            # Update wraplength based on current frame width
+            try:
+                self.root.update_idletasks()
+                frame_width = self.left_metadata_label.winfo_width()
+                if frame_width > 100:  # Only update if frame has been rendered
+                    self.left_metadata_label.config(text=metadata_text, wraplength=max(frame_width - 20, 300))
+                else:
+                    self.left_metadata_label.config(text=metadata_text, wraplength=400)
+            except:
+                self.left_metadata_label.config(text=metadata_text, wraplength=400)
         else:
             self.right_info_label.config(text=info_text)
-            self.right_metadata_label.config(text=metadata_text)
+            # Update wraplength based on current frame width
+            try:
+                self.root.update_idletasks()
+                frame_width = self.right_metadata_label.winfo_width()
+                if frame_width > 100:  # Only update if frame has been rendered
+                    self.right_metadata_label.config(text=metadata_text, wraplength=max(frame_width - 20, 300))
+                else:
+                    self.right_metadata_label.config(text=metadata_text, wraplength=400)
+            except:
+                self.right_metadata_label.config(text=metadata_text, wraplength=400)
     
     def vote(self, side: str):
         """Process a vote for the specified side."""
@@ -484,6 +568,9 @@ class MainWindow:
         if filename:
             success, error_msg = self.data_manager.load_from_file(filename)
             if success:
+                # Clear old images before loading new ones
+                self.clear_old_images()
+                
                 # Reload images from folder
                 self.load_images()
                 
@@ -521,3 +608,20 @@ class MainWindow:
             self.settings_window = SettingsWindow(self.root, self.data_manager)
         else:
             self.settings_window.show()
+    
+    def on_closing(self):
+        """Handle application closing."""
+        # Cancel any pending timers
+        if self.resize_timer:
+            self.root.after_cancel(self.resize_timer)
+        if self.preload_timer:
+            self.root.after_cancel(self.preload_timer)
+        
+        # Clear all image references
+        self.clear_old_images()
+        
+        # Clean up image processor resources
+        self.image_processor.cleanup_resources()
+        
+        # Destroy the window
+        self.root.destroy()
