@@ -6,14 +6,15 @@ which images should be compared next. The algorithm considers multiple factors:
 - Recency (how recently an image was voted on)
 - Vote count (prioritizing images with fewer votes)
 - Tier stability (prioritizing images with unstable positions)
-- Tier size (prioritizing images in crowded tiers)
+- Tier size (prioritizing images in tiers that deviate from expected normal distribution)
 
-By centralizing this logic, we can easily experiment with different ranking
-strategies and maintain the complex selection logic in one place.
+The tier size calculation now considers that tiers should follow a normal distribution
+centered at tier 0, with tier 0 being the largest and sizes decreasing as we move away.
 """
 
 import random
 import statistics
+import math
 from typing import List, Tuple, Dict, Any, Optional, Set
 from collections import defaultdict
 
@@ -212,6 +213,38 @@ class RankingAlgorithm:
         
         return None, None
     
+    def _calculate_expected_tier_proportion(self, tier: int, total_images: int) -> float:
+        """
+        Calculate the expected proportion of images that should be in a given tier
+        based on a normal distribution centered at tier 0.
+        
+        Args:
+            tier: The tier number (can be positive, negative, or zero)
+            total_images: Total number of images in the system
+            
+        Returns:
+            Expected proportion of images (0.0 to 1.0) that should be in this tier
+        """
+        # Use normal distribution probability density function
+        # Higher density at tier 0, decreasing as we move away
+        std_dev = self.data_manager.tier_distribution_std
+        
+        # Calculate the probability density for this tier
+        # Using a simplified approach: e^(-(tier^2)/(2*std_dev^2))
+        density = math.exp(-(tier ** 2) / (2 * std_dev ** 2))
+        
+        # We need to normalize this across all existing tiers
+        # Get all existing tiers to calculate total density
+        all_tiers = set()
+        for stats in self.data_manager.image_stats.values():
+            all_tiers.add(stats.get('current_tier', 0))
+        
+        # Calculate total density across all existing tiers
+        total_density = sum(math.exp(-(t ** 2) / (2 * std_dev ** 2)) for t in all_tiers)
+        
+        # Return normalized proportion
+        return density / total_density if total_density > 0 else 0.0
+    
     def _calculate_priority_scores(self, images: List[str]) -> Dict[str, float]:
         """
         Calculate priority scores for each image based on multiple factors.
@@ -233,12 +266,28 @@ class RankingAlgorithm:
         max_stability = max(self._calculate_tier_stability(img) for img in images)
         vote_count = self.data_manager.vote_count
         
-        # Calculate tier sizes
+        # Calculate tier sizes and expected sizes based on normal distribution
         tier_sizes = defaultdict(int)
         for img in images:
             tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
             tier_sizes[tier] += 1
-        max_tier_size = max(tier_sizes.values()) if tier_sizes else 1
+        
+        total_images = len(images)
+        
+        # Calculate tier size scores based on deviation from expected normal distribution
+        tier_size_scores = {}
+        for tier, actual_size in tier_sizes.items():
+            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
+            expected_size = expected_proportion * total_images
+            
+            # Score is higher when tier is more over-populated than expected
+            # This means tiers with more images than they should have get higher priority
+            if expected_size > 0:
+                overpopulation_ratio = actual_size / expected_size
+                # Cap the ratio to prevent extreme scores
+                tier_size_scores[tier] = min(overpopulation_ratio, 3.0) / 3.0
+            else:
+                tier_size_scores[tier] = 0.0
         
         # Calculate priority scores
         image_priorities = {}
@@ -263,9 +312,9 @@ class RankingAlgorithm:
             stability = self._calculate_tier_stability(img)
             stability_score = stability / (max_stability + 0.1)
             
-            # Tier size score: higher = tier has more images (needs more sorting)
+            # Tier size score: higher = tier is more over-populated than expected
             current_tier = stats.get('current_tier', 0)
-            tier_size_score = tier_sizes.get(current_tier, 1) / max_tier_size
+            tier_size_score = tier_size_scores.get(current_tier, 0.0)
             
             # Combined priority score (weighted average)
             priority = (weights['recency'] * recency_score + 
@@ -383,13 +432,63 @@ class RankingAlgorithm:
         tier_diff = abs(tier1 - tier2)
         
         if tier_diff == 0:
-            # Same tier comparison
+            # Same tier comparison - check if tier is over-populated
             tier_size = sum(1 for img in self.data_manager.image_stats.keys() 
                           if self.data_manager.get_image_stats(img).get('current_tier', 0) == tier1)
-            return f"Comparing images within Tier {tier1} ({tier_size} images in tier)"
+            
+            total_images = len(self.data_manager.image_stats)
+            expected_proportion = self._calculate_expected_tier_proportion(tier1, total_images)
+            expected_size = expected_proportion * total_images
+            
+            if tier_size > expected_size * 1.2:  # 20% threshold for "over-populated"
+                return f"Comparing images within over-populated Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f})"
+            else:
+                return f"Comparing images within Tier {tier1} ({tier_size} images in tier)"
         else:
             # Different tier comparison
             return f"Comparing Tier {tier1} vs Tier {tier2} (difference: {tier_diff})"
+    
+    def get_tier_distribution_info(self) -> Dict[str, Any]:
+        """
+        Get information about current tier distribution vs expected distribution.
+        
+        Returns:
+            Dictionary containing distribution analysis
+        """
+        if not self.data_manager.image_stats:
+            return {}
+        
+        # Calculate actual tier distribution
+        actual_distribution = defaultdict(int)
+        for stats in self.data_manager.image_stats.values():
+            tier = stats.get('current_tier', 0)
+            actual_distribution[tier] += 1
+        
+        total_images = len(self.data_manager.image_stats)
+        
+        # Calculate expected distribution
+        expected_distribution = {}
+        distribution_analysis = {}
+        
+        for tier in actual_distribution.keys():
+            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
+            expected_count = expected_proportion * total_images
+            actual_count = actual_distribution[tier]
+            
+            expected_distribution[tier] = expected_count
+            distribution_analysis[tier] = {
+                'actual': actual_count,
+                'expected': expected_count,
+                'ratio': actual_count / expected_count if expected_count > 0 else 0,
+                'deviation': actual_count - expected_count
+            }
+        
+        return {
+            'actual_distribution': dict(actual_distribution),
+            'expected_distribution': expected_distribution,
+            'analysis': distribution_analysis,
+            'total_images': total_images
+        }
     
     def invalidate_cache(self):
         """Invalidate the cached rankings to force recalculation."""

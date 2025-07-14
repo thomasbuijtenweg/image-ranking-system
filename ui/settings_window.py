@@ -35,6 +35,8 @@ class SettingsWindow:
         self.weight_labels = {}
         self.total_weight_label = None
         self.weight_warning_label = None
+        self.tier_std_var = None
+        self.tier_std_label = None
     
     def show(self):
         """Show the settings window, creating it if necessary."""
@@ -47,8 +49,8 @@ class SettingsWindow:
     def create_window(self):
         """Create the settings window with all its components."""
         self.window = tk.Toplevel(self.parent)
-        self.window.title("Selection Weight Settings")
-        self.window.geometry("500x450")
+        self.window.title("Algorithm Settings")
+        self.window.geometry("600x650")
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         # Handle window closing
@@ -76,27 +78,97 @@ class SettingsWindow:
         
         # Update initial display
         self.update_weight_display()
+        self.update_tier_std_display()
     
     def create_settings_content(self, parent: tk.Frame):
         """Create the main settings content."""
         # Title
-        tk.Label(parent, text="Adjust Selection Weights", 
-                font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY).pack(pady=10)
+        tk.Label(parent, text="Algorithm Settings", 
+                font=('Arial', 16, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY).pack(pady=10)
         
-        tk.Label(parent, text="These weights determine how images are prioritized for comparison",
-                font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_PRIMARY).pack(pady=5)
-        
-        # Weight adjustment frame
-        weights_frame = tk.Frame(parent, bg=Colors.BG_PRIMARY)
-        weights_frame.pack(padx=20, pady=20)
-        
-        # Create weight controls
-        self.create_weight_controls(weights_frame)
+        # Create sections
+        self.create_weight_section(parent)
+        self.create_tier_distribution_section(parent)
         
         # Apply button
         tk.Button(parent, text="Apply Changes", 
-                 command=self.apply_weight_changes,
-                 bg=Colors.BUTTON_SUCCESS, fg='white', font=('Arial', 12), relief=tk.FLAT).pack(pady=10)
+                 command=self.apply_changes,
+                 bg=Colors.BUTTON_SUCCESS, fg='white', font=('Arial', 12), relief=tk.FLAT).pack(pady=20)
+    
+    def create_weight_section(self, parent: tk.Frame):
+        """Create the weight adjustment section."""
+        # Weight section frame
+        weight_section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
+        weight_section.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title
+        tk.Label(weight_section, text="Selection Weights", 
+                font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=10)
+        
+        tk.Label(weight_section, text="These weights determine how images are prioritized for comparison",
+                font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(pady=5)
+        
+        # Weight adjustment frame
+        weights_frame = tk.Frame(weight_section, bg=Colors.BG_SECONDARY)
+        weights_frame.pack(padx=20, pady=10)
+        
+        # Create weight controls
+        self.create_weight_controls(weights_frame)
+    
+    def create_tier_distribution_section(self, parent: tk.Frame):
+        """Create the tier distribution section."""
+        # Tier distribution section frame
+        tier_section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
+        tier_section.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title
+        tk.Label(tier_section, text="Tier Distribution", 
+                font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=10)
+        
+        # Description
+        description_text = ("Controls how tiers should be distributed. Lower values create a tighter distribution "
+                          "around tier 0, higher values create a wider spread.")
+        tk.Label(tier_section, text=description_text, font=('Arial', 10, 'italic'), 
+                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, wraplength=500, justify=tk.LEFT).pack(pady=5)
+        
+        # Tier distribution controls
+        tier_frame = tk.Frame(tier_section, bg=Colors.BG_SECONDARY)
+        tier_frame.pack(padx=20, pady=10)
+        
+        # Standard deviation control
+        tk.Label(tier_frame, text="Tier Distribution Standard Deviation", 
+                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        
+        detail_text = ("Lower values (0.5-1.0): Tighter distribution, most images in tier 0\n"
+                      "Medium values (1.0-2.0): Balanced distribution\n"
+                      "Higher values (2.0-3.0): Wider distribution, more images in outer tiers")
+        tk.Label(tier_frame, text=detail_text, font=('Arial', 9), 
+                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, justify=tk.LEFT).pack(anchor=tk.W, pady=5)
+        
+        # Get current value with fallback for backward compatibility
+        if not hasattr(self.data_manager, 'tier_distribution_std'):
+            self.data_manager.tier_distribution_std = 1.5  # Set default value
+        current_value = self.data_manager.tier_distribution_std
+        
+        self.tier_std_label = tk.Label(tier_frame, text=f"Current: {current_value:.2f}", 
+                                      fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
+        self.tier_std_label.pack(anchor=tk.W)
+        
+        # Slider
+        self.tier_std_var = tk.DoubleVar(value=current_value)
+        
+        slider = tk.Scale(tier_frame, from_=0.5, to=3.0, resolution=0.1,
+                        orient=tk.HORIZONTAL, variable=self.tier_std_var,
+                        command=lambda v: self.update_tier_std_display(),
+                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
+                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_INFO,
+                        length=400)
+        slider.pack(fill=tk.X, padx=20, pady=5)
+        
+        # Preview distribution button
+        tk.Button(tier_frame, text="Preview Distribution", 
+                 command=self.preview_distribution,
+                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(pady=10)
     
     def create_weight_controls(self, parent: tk.Frame):
         """Create the weight adjustment controls."""
@@ -104,7 +176,7 @@ class SettingsWindow:
             ('recency', 'Recency Weight', 'Higher = prioritize images not voted recently'),
             ('low_votes', 'Low Votes Weight', 'Higher = prioritize images with fewer total votes'),
             ('instability', 'Instability Weight', 'Higher = prioritize images with unstable tiers'),
-            ('tier_size', 'Tier Size Weight', 'Higher = prioritize images in crowded tiers')
+            ('tier_size', 'Tier Size Weight', 'Higher = prioritize images in over-populated tiers')
         ]
         
         for key, title, description in weights_info:
@@ -113,11 +185,11 @@ class SettingsWindow:
         # Total weight label
         self.total_weight_label = tk.Label(parent, 
                                          text="Total: 0.00",
-                                         font=('Arial', 10), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY)
+                                         font=('Arial', 10), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         self.total_weight_label.pack(pady=10)
         
         # Warning label
-        self.weight_warning_label = tk.Label(parent, text="", fg=Colors.TEXT_ERROR, bg=Colors.BG_PRIMARY)
+        self.weight_warning_label = tk.Label(parent, text="", fg=Colors.TEXT_ERROR, bg=Colors.BG_SECONDARY)
         self.weight_warning_label.pack()
         
         # Normalize button
@@ -127,19 +199,19 @@ class SettingsWindow:
     def create_weight_control(self, parent: tk.Frame, key: str, title: str, description: str):
         """Create a single weight control widget."""
         # Frame for this weight
-        weight_frame = tk.Frame(parent, bg=Colors.BG_PRIMARY)
+        weight_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY)
         weight_frame.pack(fill=tk.X, pady=10)
         
         # Title and description
         tk.Label(weight_frame, text=title, font=('Arial', 11, 'bold'), 
-                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY).pack(anchor=tk.W)
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         tk.Label(weight_frame, text=description, font=('Arial', 9, 'italic'), 
-                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_PRIMARY).pack(anchor=tk.W)
+                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
         # Current value label
         current_value = self.data_manager.weights.get(key, 0.25)
         value_label = tk.Label(weight_frame, text=f"Current: {current_value:.2f}", 
-                             fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY)
+                             fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         value_label.pack(anchor=tk.W)
         self.weight_labels[key] = value_label
         
@@ -150,7 +222,7 @@ class SettingsWindow:
         slider = tk.Scale(weight_frame, from_=0, to=1, resolution=0.05,
                         orient=tk.HORIZONTAL, variable=var,
                         command=lambda v, k=key: self.update_weight_label(k),
-                        bg=Colors.BG_PRIMARY, fg=Colors.TEXT_PRIMARY, 
+                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
                         troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_SUCCESS)
         slider.pack(fill=tk.X, padx=20)
     
@@ -171,6 +243,12 @@ class SettingsWindow:
         else:
             self.weight_warning_label.config(text="✓ Weights sum to 1.0")
     
+    def update_tier_std_display(self):
+        """Update the tier standard deviation display."""
+        if self.tier_std_var is not None:
+            value = self.tier_std_var.get()
+            self.tier_std_label.config(text=f"Current: {value:.2f}")
+    
     def normalize_weights(self):
         """Normalize weights to sum to 1.0."""
         total = sum(var.get() for var in self.weight_vars.values())
@@ -179,13 +257,49 @@ class SettingsWindow:
                 var.set(var.get() / total)
             self.update_weight_display()
     
-    def apply_weight_changes(self):
+    def preview_distribution(self):
+        """Show a preview of what the tier distribution should look like."""
+        import math
+        
+        std_dev = self.tier_std_var.get()
+        
+        # Calculate expected proportions for tiers -5 to +5
+        tiers = list(range(-5, 6))
+        proportions = []
+        
+        for tier in tiers:
+            density = math.exp(-(tier ** 2) / (2 * std_dev ** 2))
+            proportions.append(density)
+        
+        # Normalize proportions
+        total_density = sum(proportions)
+        normalized_proportions = [p / total_density for p in proportions]
+        
+        # Create preview text
+        preview_text = f"Expected Distribution (std dev = {std_dev:.1f}):\n\n"
+        
+        for tier, proportion in zip(tiers, normalized_proportions):
+            percentage = proportion * 100
+            bar_length = int(percentage * 2)  # Scale for visual bar
+            bar = "█" * bar_length
+            preview_text += f"Tier {tier:+2d}: {percentage:5.1f}% {bar}\n"
+        
+        # Show in message box
+        messagebox.showinfo("Tier Distribution Preview", preview_text)
+    
+    def apply_changes(self):
         """Apply the weight changes and close the window."""
         # Update weights in data manager
         for key, var in self.weight_vars.items():
             self.data_manager.weights[key] = var.get()
         
-        messagebox.showinfo("Success", "Weights updated successfully!")
+        # Update tier distribution parameter (ensure it exists)
+        if not hasattr(self.data_manager, 'tier_distribution_std'):
+            self.data_manager.tier_distribution_std = 1.5  # Set default if missing
+        if self.tier_std_var is not None:
+            self.data_manager.tier_distribution_std = self.tier_std_var.get()
+        
+        messagebox.showinfo("Success", "Settings updated successfully!")
         self.close_window()
     
     def close_window(self):

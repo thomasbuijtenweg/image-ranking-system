@@ -39,6 +39,9 @@ class DataManager:
         self.image_stats = {}
         self.weights = Defaults.SELECTION_WEIGHTS.copy()
         
+        # Tier distribution parameter for normal distribution calculation
+        self.tier_distribution_std = 1.5  # Default standard deviation
+        
         # Cached data for performance
         self._last_calculated_rankings = None
         self._last_calculation_vote_count = -1
@@ -194,8 +197,9 @@ class DataManager:
                 'vote_count': self.vote_count,
                 'image_stats': self.image_stats,
                 'weights': self.weights,
+                'tier_distribution_std': self.tier_distribution_std,
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.0'  # For future data format migrations
+                'version': '1.1'  # Updated version for new parameter
             }
             
             with open(filename, 'w', encoding='utf-8') as f:
@@ -238,6 +242,12 @@ class DataManager:
             else:
                 self.weights = Defaults.SELECTION_WEIGHTS.copy()
             
+            # Load tier distribution parameter (with backward compatibility)
+            if 'tier_distribution_std' in data:
+                self.tier_distribution_std = data['tier_distribution_std']
+            else:
+                self.tier_distribution_std = 1.5  # Default value for older files
+            
             # Validate and fix any missing fields in image stats
             for image_filename in self.image_stats:
                 self.initialize_image_stats(image_filename)
@@ -274,6 +284,10 @@ class DataManager:
             for image_name, stats in self.image_stats.items():
                 if len(stats['tier_history']) != stats['votes'] + 1:  # +1 for initial tier
                     return False, f"Tier history length mismatch for {image_name}"
+            
+            # Validate tier distribution parameter
+            if not isinstance(self.tier_distribution_std, (int, float)) or self.tier_distribution_std <= 0:
+                return False, "Invalid tier distribution standard deviation"
             
             return True, ""
             
