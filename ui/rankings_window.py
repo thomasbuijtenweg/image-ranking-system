@@ -2,11 +2,11 @@
 Rankings window module for the Image Ranking System.
 
 This module implements the rankings display window that shows images
-ranked by various metrics like tier, win rate, and total votes.
+in a single sortable table instead of multiple redundant tabs.
 Now includes image preview functionality on hover using the ImagePreviewMixin.
 
-By separating this window logic into its own module, we create a
-clean separation of concerns and make the code more maintainable.
+By using a single sortable table, we create a more efficient and
+user-friendly interface that eliminates redundant information display.
 """
 
 import tkinter as tk
@@ -20,15 +20,14 @@ from ui.mixins import ImagePreviewMixin
 
 class RankingsWindow(ImagePreviewMixin):
     """
-    Window for displaying image rankings across different metrics.
+    Window for displaying image rankings in a single sortable table.
     
-    This window provides tabbed views of rankings sorted by various
-    criteria, giving users insight into how images are performing
-    in the ranking system. Now includes image preview on hover using
-    the ImagePreviewMixin.
+    This window provides a comprehensive view of all ranking metrics
+    in one sortable table, giving users efficient access to ranking
+    information with image preview on hover using the ImagePreviewMixin.
     """
     
-    def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm):
+    def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm, prompt_analyzer):
         """
         Initialize the rankings window.
         
@@ -36,6 +35,7 @@ class RankingsWindow(ImagePreviewMixin):
             parent: Parent window
             data_manager: DataManager instance
             ranking_algorithm: RankingAlgorithm instance
+            prompt_analyzer: PromptAnalyzer instance
         """
         # Initialize the mixin
         ImagePreviewMixin.__init__(self)
@@ -43,8 +43,11 @@ class RankingsWindow(ImagePreviewMixin):
         self.parent = parent
         self.data_manager = data_manager
         self.ranking_algorithm = ranking_algorithm
+        self.prompt_analyzer = prompt_analyzer
         self.window = None
-        self.trees = {}  # Store tree references for navigation
+        self.rankings_tree = None
+        self.current_sort_column = None
+        self.current_sort_reverse = False
     
     def show(self):
         """Show the rankings window, creating it if necessary."""
@@ -62,7 +65,7 @@ class RankingsWindow(ImagePreviewMixin):
         
         self.window = tk.Toplevel(self.parent)
         self.window.title("Image Rankings")
-        self.window.geometry("1800x900")  # Even larger window for optimal preview experience
+        self.window.geometry("1800x900")  # Large window for optimal table and preview experience
         self.window.minsize(1200, 600)  # Set minimum window size to prevent cramped layout
         self.window.configure(bg=Colors.BG_PRIMARY)
         
@@ -74,215 +77,290 @@ class RankingsWindow(ImagePreviewMixin):
         
         # Create main frame
         main_frame = tk.Frame(self.window, bg=Colors.BG_PRIMARY)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Create navigation frame
-        nav_frame = tk.Frame(main_frame, bg=Colors.BG_PRIMARY)
-        nav_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Configure main frame grid - 50% rankings table, 50% image preview
+        main_frame.grid_columnconfigure(0, weight=1, minsize=700)  # Rankings table
+        main_frame.grid_columnconfigure(1, weight=1, minsize=700)  # Image preview
+        main_frame.grid_rowconfigure(0, weight=1)
         
-        # Create content frame (will contain notebook and image preview)
-        content_frame = tk.Frame(main_frame, bg=Colors.BG_PRIMARY)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        
-        # Configure content frame grid - Fixed ratio: 40% rankings, 60% image preview
-        content_frame.grid_columnconfigure(0, weight=2, minsize=600)  # Rankings take 40% of width
-        content_frame.grid_columnconfigure(1, weight=3, minsize=800)  # Image preview takes 60% of width
-        content_frame.grid_rowconfigure(0, weight=1)
-        
-        # Create notebook for different ranking tabs
-        notebook = ttk.Notebook(content_frame)
-        notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
+        # Create rankings table frame
+        rankings_frame = tk.Frame(main_frame, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=2)
+        rankings_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         
         # Create image preview area using mixin
-        preview_frame = self.create_image_preview_area(content_frame, include_additional_stats=False)
+        preview_frame = self.create_image_preview_area(main_frame, include_additional_stats=False)
         preview_frame.grid(row=0, column=1, sticky="nsew")
         
-        # Get current rankings
-        rankings = self.ranking_algorithm.calculate_all_rankings()
-        
-        # Create tabs for each ranking type
-        self.create_ranking_tabs(notebook, rankings)
-        
-        # Create navigation buttons
-        self.create_navigation_buttons(nav_frame, notebook)
+        # Create the rankings table
+        self.create_rankings_table(rankings_frame)
     
-    def create_ranking_tabs(self, notebook: ttk.Notebook, rankings: Dict[str, List[Tuple[str, Dict[str, Any]]]]):
-        """
-        Create tabs for different ranking metrics.
+    def create_rankings_table(self, parent: tk.Frame):
+        """Create the main rankings table with sortable columns."""
+        # Create header with title and instructions
+        header_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY)
+        header_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        Args:
-            notebook: The notebook widget to add tabs to
-            rankings: Dictionary of ranking data from the algorithm
-        """
-        ranking_types = [
-            ("Current Tier", 'current_tier', "Highest tier first"),
-            ("Win Rate", 'win_rate', "Highest win percentage first"),
-            ("Total Votes", 'total_votes', "Most voted images first"),
-            ("Stability", 'tier_stability', "Most stable tier (lowest std dev) first"),
-            ("Recently Voted", 'recency', "Least recently voted first")
-        ]
+        # Title
+        tk.Label(header_frame, text="Image Rankings", font=('Arial', 16, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        for tab_name, ranking_key, description in ranking_types:
-            # Create frame for tab
-            frame = tk.Frame(notebook, bg=Colors.BG_SECONDARY)
-            notebook.add(frame, text=tab_name)
-            
-            # Add description
-            tk.Label(frame, text=description, font=('Arial', 10, 'italic'), 
-                    fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=5)
-            
-            # Create the ranking tree
-            tree = self.create_ranking_tree(frame, ranking_key, rankings[ranking_key])
-            self.trees[tab_name] = tree
-    
-    def create_ranking_tree(self, parent: tk.Frame, ranking_key: str, 
-                           ranking_data: List[Tuple[str, Dict[str, Any]]]) -> ttk.Treeview:
-        """
-        Create a treeview for displaying ranking data.
+        # Calculate basic statistics
+        total_images = len(self.data_manager.image_stats)
+        total_votes = self.data_manager.vote_count
         
-        Args:
-            parent: Parent frame
-            ranking_key: Key for the ranking metric
-            ranking_data: List of (image_name, metrics) tuples
-            
-        Returns:
-            The created treeview widget
-        """
-        # Create scrollable frame
-        tree_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY)
-        tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Instructions
+        instruction_text = f"Total Images: {total_images} | Total Votes: {total_votes} | Click column headers to sort • Hover over any row to see image preview"
+        tk.Label(header_frame, text=instruction_text, font=('Arial', 10, 'italic'), 
+                fg=Colors.TEXT_INFO, bg=Colors.BG_SECONDARY).pack(anchor=tk.W, pady=(5, 0))
+        
+        # Create frame for the table
+        table_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY)
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Define columns
+        columns = ('Rank', 'Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Recency', 'Prompt Preview')
         
         # Create treeview with scrollbar
-        columns = ('Rank', 'Image', 'Value', 'Votes', 'Wins', 'Losses', 'Stability', 'Prompt')
-        tree = ttk.Treeview(tree_frame, columns=columns, show='tree headings', height=20)
+        self.rankings_tree = ttk.Treeview(table_frame, columns=columns, show='tree headings', height=25)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.rankings_tree.yview)
+        self.rankings_tree.configure(yscrollcommand=scrollbar.set)
         
-        scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=tree.yview)
-        tree.configure(yscrollcommand=scrollbar.set)
-        
-        # Configure columns
-        tree.heading('Rank', text='Rank')
-        tree.heading('Image', text='Image')
-        tree.heading('Value', text=ranking_key.replace('_', ' ').title())
-        tree.heading('Votes', text='Total Votes')
-        tree.heading('Wins', text='Wins')
-        tree.heading('Losses', text='Losses')
-        tree.heading('Stability', text='Stability')
-        tree.heading('Prompt', text='Prompt')
+        # Configure column headings with click handlers
+        self.rankings_tree.heading('#0', text='', anchor=tk.W)
+        self.rankings_tree.heading('Rank', text='Rank', anchor=tk.CENTER)
+        self.rankings_tree.heading('Image', text='Image Name', anchor=tk.W)
+        self.rankings_tree.heading('Tier', text='Current Tier', anchor=tk.CENTER)
+        self.rankings_tree.heading('Votes', text='Total Votes', anchor=tk.CENTER)
+        self.rankings_tree.heading('Wins', text='Wins', anchor=tk.CENTER)
+        self.rankings_tree.heading('Losses', text='Losses', anchor=tk.CENTER)
+        self.rankings_tree.heading('Win Rate', text='Win Rate %', anchor=tk.CENTER)
+        self.rankings_tree.heading('Stability', text='Stability', anchor=tk.CENTER)
+        self.rankings_tree.heading('Recency', text='Recency', anchor=tk.CENTER)
+        self.rankings_tree.heading('Prompt Preview', text='Prompt Preview', anchor=tk.W)
         
         # Set column widths
-        tree.column('#0', width=0, stretch=False)
-        tree.column('Rank', width=50)
-        tree.column('Image', width=150)
-        tree.column('Value', width=100)
-        tree.column('Votes', width=80)
-        tree.column('Wins', width=60)
-        tree.column('Losses', width=60)
-        tree.column('Stability', width=80)
-        tree.column('Prompt', width=300)  # Wider for better prompt display
+        self.rankings_tree.column('#0', width=0, stretch=False)
+        self.rankings_tree.column('Rank', width=60)
+        self.rankings_tree.column('Image', width=180)
+        self.rankings_tree.column('Tier', width=80)
+        self.rankings_tree.column('Votes', width=80)
+        self.rankings_tree.column('Wins', width=60)
+        self.rankings_tree.column('Losses', width=60)
+        self.rankings_tree.column('Win Rate', width=80)
+        self.rankings_tree.column('Stability', width=80)
+        self.rankings_tree.column('Recency', width=90)
+        self.rankings_tree.column('Prompt Preview', width=300)
         
-        # Add data to tree
-        self.populate_ranking_tree(tree, ranking_key, ranking_data)
+        # Bind click events to column headers for sorting
+        for col in columns:
+            self.rankings_tree.heading(col, command=lambda c=col: self.sort_by_column(c))
         
         # Bind hover events
-        tree.bind('<Motion>', self.on_tree_hover)
-        tree.bind('<Leave>', self.on_tree_leave)
+        self.rankings_tree.bind('<Motion>', self.on_rankings_tree_hover)
+        self.rankings_tree.bind('<Leave>', self.on_rankings_tree_leave)
         
         # Pack tree and scrollbar
-        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.rankings_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         
-        return tree
-    
-    def populate_ranking_tree(self, tree: ttk.Treeview, ranking_key: str, 
-                             ranking_data: List[Tuple[str, Dict[str, Any]]]):
-        """
-        Populate a treeview with ranking data.
+        # Create navigation buttons
+        self.create_navigation_buttons(parent)
         
-        Args:
-            tree: The treeview to populate
-            ranking_key: Key for the ranking metric
-            ranking_data: List of (image_name, metrics) tuples
-        """
-        for rank, (img, metrics) in enumerate(ranking_data, 1):
-            stats = self.data_manager.get_image_stats(img)
-            value = metrics[ranking_key]
-            
-            # Format value based on type
-            if ranking_key == 'win_rate':
-                value_str = f"{value:.1%}"
-            elif ranking_key == 'tier_stability':
-                value_str = f"{value:.2f}"
-            elif ranking_key == 'recency':
-                value_str = f"{int(value)} votes ago" if value != float('inf') else "Never"
-            else:
-                value_str = str(int(value))
-            
-            # Calculate individual stability
-            stability = self.ranking_algorithm._calculate_tier_stability(img)
-            
-            # Get prompt if available - show more text
-            prompt = stats.get('prompt', 'No prompt found')
-            if prompt and len(prompt) > 80:  # Show more characters
-                prompt = prompt[:77] + "..."
-            
-            # Insert row into tree with image filename as tag
-            item = tree.insert('', tk.END, values=(
-                rank, img, value_str, 
-                stats.get('votes', 0), stats.get('wins', 0), stats.get('losses', 0), 
-                f"{stability:.2f}", prompt
-            ), tags=(img,))  # Use filename as tag for hover detection
+        # Populate the table
+        self.populate_rankings_table()
     
-    def on_tree_hover(self, event):
-        """Handle mouse hover over tree items."""
-        tree = event.widget
-        item = tree.identify_row(event.y)
+    def populate_rankings_table(self):
+        """Populate the rankings table with data."""
+        # Clear existing items
+        for item in self.rankings_tree.get_children():
+            self.rankings_tree.delete(item)
+        
+        # Get all rankings data
+        rankings_data = self.ranking_algorithm.calculate_all_rankings()
+        
+        # Get all images and their comprehensive stats
+        all_images = []
+        for img_name, stats in self.data_manager.image_stats.items():
+            # Calculate derived statistics
+            votes = stats.get('votes', 0)
+            wins = stats.get('wins', 0)
+            losses = stats.get('losses', 0)
+            win_rate = (wins / votes * 100) if votes > 0 else 0
+            stability = self.ranking_algorithm._calculate_tier_stability(img_name)
+            last_voted = stats.get('last_voted', -1)
+            
+            # Calculate recency
+            if last_voted == -1:
+                recency = float('inf')
+                recency_str = "Never"
+            else:
+                recency = self.data_manager.vote_count - last_voted
+                recency_str = f"{recency} ago" if recency > 0 else "Current"
+            
+            # Get prompt preview
+            prompt = stats.get('prompt', '')
+            if prompt:
+                # Use the prompt analyzer to extract main prompt
+                main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
+                prompt_preview = main_prompt[:100] + "..." if len(main_prompt) > 100 else main_prompt
+            else:
+                prompt_preview = "No prompt found"
+            
+            all_images.append({
+                'name': img_name,
+                'tier': stats.get('current_tier', 0),
+                'votes': votes,
+                'wins': wins,
+                'losses': losses,
+                'win_rate': win_rate,
+                'stability': stability,
+                'recency': recency,
+                'recency_str': recency_str,
+                'prompt_preview': prompt_preview
+            })
+        
+        # Sort by current tier (descending) by default
+        all_images.sort(key=lambda x: x['tier'], reverse=True)
+        
+        # Insert data into tree with rank numbers
+        for rank, img_data in enumerate(all_images, 1):
+            self.rankings_tree.insert('', tk.END, values=(
+                rank,
+                img_data['name'],
+                f"{img_data['tier']:+d}",
+                img_data['votes'],
+                img_data['wins'],
+                img_data['losses'],
+                f"{img_data['win_rate']:.1f}%",
+                f"{img_data['stability']:.2f}",
+                img_data['recency_str'],
+                img_data['prompt_preview']
+            ), tags=(img_data['name'],))  # Use filename as tag for hover detection
+    
+    def sort_by_column(self, column):
+        """Sort the table by the specified column."""
+        # Toggle sort direction if clicking the same column
+        if self.current_sort_column == column:
+            self.current_sort_reverse = not self.current_sort_reverse
+        else:
+            self.current_sort_column = column
+            self.current_sort_reverse = False
+        
+        # Get all items with their values
+        items = []
+        for item in self.rankings_tree.get_children():
+            values = self.rankings_tree.item(item, 'values')
+            items.append((item, values))
+        
+        # Define sort key functions for each column
+        def get_sort_key(item_data):
+            values = item_data[1]  # Get the values tuple
+            
+            if column == 'Rank':
+                return int(values[0])
+            elif column == 'Image':
+                return values[1].lower()  # Sort by name (case-insensitive)
+            elif column == 'Tier':
+                return int(values[2])  # Remove the + sign and convert to int
+            elif column == 'Votes':
+                return int(values[3])
+            elif column == 'Wins':
+                return int(values[4])
+            elif column == 'Losses':
+                return int(values[5])
+            elif column == 'Win Rate':
+                return float(values[6].rstrip('%'))  # Remove % and convert to float
+            elif column == 'Stability':
+                return float(values[7])
+            elif column == 'Recency':
+                # Special handling for "Never" and "Current"
+                if values[8] == "Never":
+                    return float('inf')
+                elif values[8] == "Current":
+                    return 0
+                else:
+                    return int(values[8].split()[0])  # Extract number from "X ago"
+            elif column == 'Prompt Preview':
+                return values[9].lower()
+            else:
+                return values[1]  # Default to name
+        
+        # Sort items
+        items.sort(key=get_sort_key, reverse=self.current_sort_reverse)
+        
+        # Update the tree order and recalculate ranks
+        for index, (item, values) in enumerate(items):
+            self.rankings_tree.move(item, '', index)
+            # Update rank column to reflect new order
+            new_values = list(values)
+            new_values[0] = index + 1
+            self.rankings_tree.item(item, values=new_values)
+        
+        # Update column header to show sort direction
+        for col in ('Rank', 'Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Recency', 'Prompt Preview'):
+            if col == column:
+                direction = " ↓" if self.current_sort_reverse else " ↑"
+                current_text = self.rankings_tree.heading(col, 'text')
+                # Remove existing direction indicators
+                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                self.rankings_tree.heading(col, text=clean_text + direction)
+            else:
+                # Remove direction indicators from other columns
+                current_text = self.rankings_tree.heading(col, 'text')
+                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                self.rankings_tree.heading(col, text=clean_text)
+    
+    def on_rankings_tree_hover(self, event):
+        """Handle mouse hover over rankings tree items."""
+        item = self.rankings_tree.identify_row(event.y)
         
         if item:
             # Get the image filename from the item's tags
-            tags = tree.item(item, 'tags')
+            tags = self.rankings_tree.item(item, 'tags')
             if tags:
                 image_filename = tags[0]
                 self.display_preview_image(image_filename)
     
-    def on_tree_leave(self, event):
-        """Handle mouse leaving the tree."""
-        # You might want to clear the preview or keep it - keeping it for now
+    def on_rankings_tree_leave(self, event):
+        """Handle mouse leaving the rankings tree."""
+        # Keep the current image displayed for better UX
         pass
     
-    def create_navigation_buttons(self, nav_frame: tk.Frame, notebook: ttk.Notebook):
-        """
-        Create navigation buttons for the rankings window.
+    def create_navigation_buttons(self, parent: tk.Frame):
+        """Create navigation buttons for the rankings window."""
+        nav_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY)
+        nav_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        Args:
-            nav_frame: Frame to contain navigation buttons
-            notebook: Notebook widget for tab operations
-        """
         def jump_to_top():
-            current_tab = notebook.tab('current')['text']
-            if current_tab in self.trees:
-                tree = self.trees[current_tab]
-                children = tree.get_children()
-                if children:
-                    tree.see(children[0])
-                    tree.selection_set(children[0])
+            children = self.rankings_tree.get_children()
+            if children:
+                self.rankings_tree.see(children[0])
+                self.rankings_tree.selection_set(children[0])
         
         def jump_to_bottom():
-            current_tab = notebook.tab('current')['text']
-            if current_tab in self.trees:
-                tree = self.trees[current_tab]
-                children = tree.get_children()
-                if children:
-                    tree.see(children[-1])
-                    tree.selection_set(children[-1])
+            children = self.rankings_tree.get_children()
+            if children:
+                self.rankings_tree.see(children[-1])
+                self.rankings_tree.selection_set(children[-1])
+        
+        def jump_to_tier_zero():
+            """Jump to the first tier 0 image."""
+            for item in self.rankings_tree.get_children():
+                values = self.rankings_tree.item(item, 'values')
+                if values[2] == "+0":  # Tier column shows "+0"
+                    self.rankings_tree.see(item)
+                    self.rankings_tree.selection_set(item)
+                    break
         
         tk.Button(nav_frame, text="Jump to Top", command=jump_to_top, 
                  bg=Colors.BUTTON_BG, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(nav_frame, text="Jump to Tier 0", command=jump_to_tier_zero, 
+                 bg=Colors.BUTTON_INFO, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
         tk.Button(nav_frame, text="Jump to Bottom", command=jump_to_bottom, 
                  bg=Colors.BUTTON_BG, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
-        
-        # Add instruction label
-        tk.Label(nav_frame, text="Hover over any image in the rankings to see a large preview →", 
-                font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_PRIMARY).pack(side=tk.RIGHT, padx=20)
     
     def close_window(self):
         """Handle window closing."""

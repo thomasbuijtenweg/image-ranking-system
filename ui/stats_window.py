@@ -3,7 +3,8 @@ Statistics window module for the Image Ranking System.
 
 This module implements the detailed statistics window that shows
 comprehensive information about individual images and overall
-system performance. Now includes image preview functionality on hover
+system performance. Now features a single sortable table instead
+of multiple redundant tabs, with image preview functionality on hover
 using the ImagePreviewMixin and prompt analysis capabilities.
 """
 
@@ -20,9 +21,8 @@ class StatsWindow(ImagePreviewMixin):
     """
     Window for displaying detailed statistics about the ranking system.
     
-    This window provides comprehensive statistics about individual images,
-    overall system performance, priority calculations, and prompt analysis.
-    Now includes image preview on hover using the ImagePreviewMixin.
+    This window provides comprehensive statistics in a single sortable table
+    with image preview on hover and prompt analysis capabilities.
     """
     
     def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm, prompt_analyzer):
@@ -44,6 +44,11 @@ class StatsWindow(ImagePreviewMixin):
         self.prompt_analyzer = prompt_analyzer
         self.window = None
         self.notebook = None
+        self.stats_tree = None
+        self.current_sort_column = None
+        self.current_sort_reverse = False
+        self.word_sort_column = None
+        self.word_sort_reverse = False
     
     def show(self):
         """Show the statistics window, creating it if necessary."""
@@ -70,8 +75,8 @@ class StatsWindow(ImagePreviewMixin):
         
         self.window = tk.Toplevel(self.parent)
         self.window.title("Detailed Statistics")
-        self.window.geometry("1600x800")  # Even larger window for optimal preview experience
-        self.window.minsize(1000, 500)  # Set minimum window size to prevent cramped layout
+        self.window.geometry("1800x900")  # Even larger window for optimal table and preview experience
+        self.window.minsize(1200, 600)  # Set minimum window size to prevent cramped layout
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         # Handle window closing
@@ -84,12 +89,12 @@ class StatsWindow(ImagePreviewMixin):
         main_frame = tk.Frame(self.window, bg=Colors.BG_PRIMARY)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Configure main frame grid - Fixed ratio: 40% stats, 60% image preview
-        main_frame.grid_columnconfigure(0, weight=2, minsize=500)  # Stats take 40% of width
-        main_frame.grid_columnconfigure(1, weight=3, minsize=700)  # Image preview takes 60% of width
+        # Configure main frame grid - 50% stats table, 50% image preview
+        main_frame.grid_columnconfigure(0, weight=1, minsize=700)  # Stats table
+        main_frame.grid_columnconfigure(1, weight=1, minsize=700)  # Image preview
         main_frame.grid_rowconfigure(0, weight=1)
         
-        # Create notebook for different stats tabs
+        # Create notebook for different tabs
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         
@@ -97,11 +102,8 @@ class StatsWindow(ImagePreviewMixin):
         preview_frame = self.create_image_preview_area(main_frame, include_additional_stats=True)
         preview_frame.grid(row=0, column=1, sticky="nsew")
         
-        # Create overall statistics tab
-        self.create_overall_stats_tab(self.notebook)
-        
-        # Create individual image details tab
-        self.create_image_details_tab(self.notebook)
+        # Create the main statistics table tab
+        self.create_main_stats_tab(self.notebook)
         
         # Create prompt analysis tab if there are prompts to analyze
         prompt_count = sum(1 for stats in self.data_manager.image_stats.values() 
@@ -109,71 +111,239 @@ class StatsWindow(ImagePreviewMixin):
         if prompt_count > 0:
             self.create_prompt_analysis_tab(self.notebook)
     
-    def create_overall_stats_tab(self, notebook: ttk.Notebook):
-        """Create the overall statistics tab."""
+    def create_main_stats_tab(self, notebook: ttk.Notebook):
+        """Create the main statistics tab with sortable table."""
         frame = tk.Frame(notebook, bg=Colors.BG_SECONDARY)
-        notebook.add(frame, text="Overall Statistics")
+        notebook.add(frame, text="Image Statistics")
         
-        # Calculate overall statistics
+        # Create header with overall statistics
+        header_frame = tk.Frame(frame, bg=Colors.BG_SECONDARY)
+        header_frame.pack(fill=tk.X, padx=10, pady=5)
+        
+        # Calculate and display overall statistics
         overall_stats = self.data_manager.get_overall_statistics()
+        overall_text = (f"Total Images: {overall_stats['total_images']} | "
+                       f"Total Votes: {overall_stats['total_votes']} | "
+                       f"Avg Votes/Image: {overall_stats['avg_votes_per_image']:.1f}")
         
-        # Create statistics text
-        stats_text = self.format_overall_stats(overall_stats)
+        tk.Label(header_frame, text=overall_text, font=('Arial', 12, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        # Display statistics
-        stats_label = tk.Label(frame, text=stats_text, font=('Courier', 12), justify=tk.LEFT, 
-                              fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        stats_label.pack(padx=20, pady=20)
+        # Add tier distribution summary
+        tier_dist = overall_stats['tier_distribution']
+        tier_text = "Tier Distribution: "
+        for tier in sorted(tier_dist.keys(), reverse=True):
+            if tier_dist[tier] > 0:
+                tier_text += f"T{tier:+d}:{tier_dist[tier]} "
         
-        # Add instruction text
-        instruction_text = "\nSwitch to other tabs and hover over any image frame to see a large preview."
-        instruction_label = tk.Label(frame, text=instruction_text, font=('Arial', 10, 'italic'), 
-                                   fg=Colors.TEXT_INFO, bg=Colors.BG_SECONDARY)
-        instruction_label.pack(pady=10)
+        tk.Label(header_frame, text=tier_text, font=('Arial', 10), 
+                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        
+        # Instructions
+        instruction_text = "Click column headers to sort • Hover over any row to see image preview"
+        tk.Label(header_frame, text=instruction_text, font=('Arial', 10, 'italic'), 
+                fg=Colors.TEXT_INFO, bg=Colors.BG_SECONDARY).pack(anchor=tk.W, pady=(5, 0))
+        
+        # Create the statistics table
+        self.create_stats_table(frame)
     
-    def format_overall_stats(self, stats: dict) -> str:
-        """Format overall statistics for display."""
-        text = f"""
-Total Images: {stats['total_images']}
-Total Votes Cast: {stats['total_votes']}
-Average Votes per Image: {stats['avg_votes_per_image']:.1f}
-
-Tier Distribution:
-"""
+    def create_stats_table(self, parent: tk.Frame):
+        """Create the main statistics table with sortable columns."""
+        # Create frame for the table
+        table_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY)
+        table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        tier_distribution = stats['tier_distribution']
-        for tier in sorted(tier_distribution.keys(), reverse=True):
-            text += f"  Tier {tier:+3d}: {tier_distribution[tier]} images\n"
+        # Define columns
+        columns = ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Last Voted', 'Prompt Preview')
         
-        return text
+        # Create treeview with scrollbar
+        self.stats_tree = ttk.Treeview(table_frame, columns=columns, show='tree headings', height=25)
+        scrollbar = ttk.Scrollbar(table_frame, orient="vertical", command=self.stats_tree.yview)
+        self.stats_tree.configure(yscrollcommand=scrollbar.set)
+        
+        # Configure column headings with click handlers
+        self.stats_tree.heading('#0', text='', anchor=tk.W)
+        self.stats_tree.heading('Image', text='Image Name', anchor=tk.W)
+        self.stats_tree.heading('Tier', text='Current Tier', anchor=tk.CENTER)
+        self.stats_tree.heading('Votes', text='Total Votes', anchor=tk.CENTER)
+        self.stats_tree.heading('Wins', text='Wins', anchor=tk.CENTER)
+        self.stats_tree.heading('Losses', text='Losses', anchor=tk.CENTER)
+        self.stats_tree.heading('Win Rate', text='Win Rate %', anchor=tk.CENTER)
+        self.stats_tree.heading('Stability', text='Stability', anchor=tk.CENTER)
+        self.stats_tree.heading('Last Voted', text='Last Voted', anchor=tk.CENTER)
+        self.stats_tree.heading('Prompt Preview', text='Prompt Preview', anchor=tk.W)
+        
+        # Set column widths
+        self.stats_tree.column('#0', width=0, stretch=False)
+        self.stats_tree.column('Image', width=180)
+        self.stats_tree.column('Tier', width=80)
+        self.stats_tree.column('Votes', width=80)
+        self.stats_tree.column('Wins', width=60)
+        self.stats_tree.column('Losses', width=60)
+        self.stats_tree.column('Win Rate', width=80)
+        self.stats_tree.column('Stability', width=80)
+        self.stats_tree.column('Last Voted', width=90)
+        self.stats_tree.column('Prompt Preview', width=300)
+        
+        # Bind click events to column headers for sorting
+        for col in columns:
+            self.stats_tree.heading(col, command=lambda c=col: self.sort_by_column(c))
+        
+        # Bind hover events
+        self.stats_tree.bind('<Motion>', self.on_stats_tree_hover)
+        self.stats_tree.bind('<Leave>', self.on_stats_tree_leave)
+        
+        # Pack tree and scrollbar
+        self.stats_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Populate the table
+        self.populate_stats_table()
     
-    def create_image_details_tab(self, notebook: ttk.Notebook):
-        """Create the individual image details tab."""
-        frame = tk.Frame(notebook, bg=Colors.BG_SECONDARY)
-        notebook.add(frame, text="Image Details")
+    def populate_stats_table(self):
+        """Populate the statistics table with data."""
+        # Clear existing items
+        for item in self.stats_tree.get_children():
+            self.stats_tree.delete(item)
         
-        # Navigation buttons
-        nav_frame = tk.Frame(frame, bg=Colors.BG_SECONDARY)
-        nav_frame.pack(fill=tk.X, padx=10, pady=5)
+        # Get all images and their stats
+        all_images = []
+        for img_name, stats in self.data_manager.image_stats.items():
+            # Calculate derived statistics
+            votes = stats.get('votes', 0)
+            wins = stats.get('wins', 0)
+            losses = stats.get('losses', 0)
+            win_rate = (wins / votes * 100) if votes > 0 else 0
+            stability = self.ranking_algorithm._calculate_tier_stability(img_name)
+            last_voted = stats.get('last_voted', -1)
+            
+            # Format last voted
+            if last_voted == -1:
+                last_voted_str = "Never"
+            else:
+                votes_ago = self.data_manager.vote_count - last_voted
+                last_voted_str = f"{votes_ago} ago" if votes_ago > 0 else "Current"
+            
+            # Get prompt preview
+            prompt = stats.get('prompt', '')
+            if prompt:
+                main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
+                prompt_preview = main_prompt[:100] + "..." if len(main_prompt) > 100 else main_prompt
+            else:
+                prompt_preview = "No prompt found"
+            
+            all_images.append({
+                'name': img_name,
+                'tier': stats.get('current_tier', 0),
+                'votes': votes,
+                'wins': wins,
+                'losses': losses,
+                'win_rate': win_rate,
+                'stability': stability,
+                'last_voted': last_voted,
+                'last_voted_str': last_voted_str,
+                'prompt_preview': prompt_preview
+            })
         
-        # Create scrollable frame for image details
-        canvas = tk.Canvas(frame, bg=Colors.BG_SECONDARY, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg=Colors.BG_SECONDARY)
+        # Sort by current tier (descending) by default
+        all_images.sort(key=lambda x: x['tier'], reverse=True)
         
-        canvas.configure(yscrollcommand=scrollbar.set)
-        canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        # Insert data into tree
+        for img_data in all_images:
+            self.stats_tree.insert('', tk.END, values=(
+                img_data['name'],
+                f"{img_data['tier']:+d}",
+                img_data['votes'],
+                img_data['wins'],
+                img_data['losses'],
+                f"{img_data['win_rate']:.1f}%",
+                f"{img_data['stability']:.2f}",
+                img_data['last_voted_str'],
+                img_data['prompt_preview']
+            ), tags=(img_data['name'],))  # Use filename as tag for hover detection
+    
+    def sort_by_column(self, column):
+        """Sort the table by the specified column."""
+        # Toggle sort direction if clicking the same column
+        if self.current_sort_column == column:
+            self.current_sort_reverse = not self.current_sort_reverse
+        else:
+            self.current_sort_column = column
+            self.current_sort_reverse = False
         
-        # Create navigation buttons
-        self.create_detail_navigation_buttons(nav_frame, canvas)
+        # Get all items with their values
+        items = []
+        for item in self.stats_tree.get_children():
+            values = self.stats_tree.item(item, 'values')
+            items.append((item, values))
         
-        # Add image details
-        self.populate_image_details(scrollable_frame)
+        # Define sort key functions for each column
+        def get_sort_key(item_data):
+            values = item_data[1]  # Get the values tuple
+            
+            if column == 'Image':
+                return values[0].lower()  # Sort by name (case-insensitive)
+            elif column == 'Tier':
+                return int(values[1])  # Remove the + sign and convert to int
+            elif column == 'Votes':
+                return int(values[2])
+            elif column == 'Wins':
+                return int(values[3])
+            elif column == 'Losses':
+                return int(values[4])
+            elif column == 'Win Rate':
+                return float(values[5].rstrip('%'))  # Remove % and convert to float
+            elif column == 'Stability':
+                return float(values[6])
+            elif column == 'Last Voted':
+                # Special handling for "Never" and "Current"
+                if values[7] == "Never":
+                    return float('inf')
+                elif values[7] == "Current":
+                    return 0
+                else:
+                    return int(values[7].split()[0])  # Extract number from "X ago"
+            elif column == 'Prompt Preview':
+                return values[8].lower()
+            else:
+                return values[0]  # Default to name
         
-        # Configure scrolling
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+        # Sort items
+        items.sort(key=get_sort_key, reverse=self.current_sort_reverse)
+        
+        # Update the tree order
+        for index, (item, values) in enumerate(items):
+            self.stats_tree.move(item, '', index)
+        
+        # Update column header to show sort direction
+        for col in ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Last Voted', 'Prompt Preview'):
+            if col == column:
+                direction = " ↓" if self.current_sort_reverse else " ↑"
+                current_text = self.stats_tree.heading(col, 'text')
+                # Remove existing direction indicators
+                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                self.stats_tree.heading(col, text=clean_text + direction)
+            else:
+                # Remove direction indicators from other columns
+                current_text = self.stats_tree.heading(col, 'text')
+                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                self.stats_tree.heading(col, text=clean_text)
+    
+    def on_stats_tree_hover(self, event):
+        """Handle mouse hover over stats tree items."""
+        item = self.stats_tree.identify_row(event.y)
+        
+        if item:
+            # Get the image filename from the item's tags
+            tags = self.stats_tree.item(item, 'tags')
+            if tags:
+                image_filename = tags[0]
+                self.display_preview_image(image_filename)
+    
+    def on_stats_tree_leave(self, event):
+        """Handle mouse leaving the stats tree."""
+        # Keep the current image displayed for better UX
+        pass
     
     def create_prompt_analysis_tab(self, notebook: ttk.Notebook):
         """Create the prompt analysis tab."""
@@ -190,52 +360,32 @@ Tier Distribution:
         
         # Analysis summary
         summary = self.prompt_analyzer.get_analysis_summary()
-        summary_text = (f"Prompt Analysis Summary:\n"
-                       f"• Total unique words: {summary['total_words']}\n"
-                       f"• Images with prompts: {summary['total_images_with_prompts']}\n"
-                       f"• Rare words (< 3 appearances): {summary['rare_words_count']}\n"
-                       f"• Average words per image: {summary['avg_words_per_image']:.1f}")
+        summary_text = (f"Prompt Analysis Summary: {summary['total_words']} unique words | "
+                       f"{summary['total_images_with_prompts']} images with prompts | "
+                       f"{summary['rare_words_count']} rare words | "
+                       f"{summary['avg_words_per_image']:.1f} avg words/image")
         
         summary_label = tk.Label(control_frame, text=summary_text, 
-                                font=('Arial', 11), fg=Colors.TEXT_PRIMARY, 
+                                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, 
                                 bg=Colors.BG_SECONDARY, justify=tk.LEFT)
         summary_label.pack(anchor=tk.W, pady=(0, 10))
         
-        # Control buttons
+        # Control buttons frame
         button_frame = tk.Frame(control_frame, bg=Colors.BG_SECONDARY)
         button_frame.pack(fill=tk.X)
         
-        # Sort options
-        tk.Label(button_frame, text="Sort by:", font=('Arial', 10, 'bold'), 
-                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(side=tk.LEFT, padx=(0, 5))
+        # Instructions
+        instruction_text = "Click column headers to sort • Hover over any row to see example image"
+        tk.Label(button_frame, text=instruction_text, font=('Arial', 10, 'italic'), 
+                fg=Colors.TEXT_INFO, bg=Colors.BG_SECONDARY).pack(side=tk.LEFT)
         
-        self.sort_var = tk.StringVar(value="average_tier")
-        sort_options = [
-            ("Average Tier (High to Low)", "average_tier_desc"),
-            ("Average Tier (Low to High)", "average_tier_asc"),
-            ("Frequency (High to Low)", "frequency_desc"),
-            ("Frequency (Low to High)", "frequency_asc"),
-            ("Alphabetical", "alphabetical")
-        ]
-        
-        for text, value in sort_options:
-            tk.Radiobutton(button_frame, text=text, variable=self.sort_var, value=value,
-                          fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY,
-                          selectcolor=Colors.BG_TERTIARY).pack(side=tk.LEFT, padx=5)
-        
-        # Refresh and export buttons
-        button_row2 = tk.Frame(control_frame, bg=Colors.BG_SECONDARY)
-        button_row2.pack(fill=tk.X, pady=(5, 0))
-        
-        tk.Button(button_row2, text="Refresh Analysis", command=self.refresh_prompt_analysis,
-                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=(0, 5))
-        
-        tk.Button(button_row2, text="Export Word Analysis", command=self.export_word_analysis,
-                 bg=Colors.BUTTON_WARNING, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        # Export button
+        tk.Button(button_frame, text="Export Word Analysis", command=self.export_word_analysis,
+                 bg=Colors.BUTTON_WARNING, fg='white', relief=tk.FLAT).pack(side=tk.RIGHT, padx=(10, 0))
         
         # Search frame
-        search_frame = tk.Frame(button_row2, bg=Colors.BG_SECONDARY)
-        search_frame.pack(side=tk.LEFT, padx=(20, 0))
+        search_frame = tk.Frame(button_frame, bg=Colors.BG_SECONDARY)
+        search_frame.pack(side=tk.RIGHT, padx=(20, 10))
         
         tk.Label(search_frame, text="Search words:", font=('Arial', 10), 
                 fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(side=tk.LEFT)
@@ -260,13 +410,14 @@ Tier Distribution:
         word_scrollbar = ttk.Scrollbar(tree_frame, orient="vertical", command=self.word_tree.yview)
         self.word_tree.configure(yscrollcommand=word_scrollbar.set)
         
-        # Configure columns
-        self.word_tree.heading('Word', text='Word')
-        self.word_tree.heading('Frequency', text='Frequency')
-        self.word_tree.heading('Avg Tier', text='Avg Tier')
-        self.word_tree.heading('Std Dev', text='Std Dev')
-        self.word_tree.heading('Tier Range', text='Tier Range')
-        self.word_tree.heading('Example Images', text='Example Images')
+        # Configure column headings with click handlers
+        self.word_tree.heading('#0', text='', anchor=tk.W)
+        self.word_tree.heading('Word', text='Word', anchor=tk.W)
+        self.word_tree.heading('Frequency', text='Frequency', anchor=tk.CENTER)
+        self.word_tree.heading('Avg Tier', text='Avg Tier', anchor=tk.CENTER)
+        self.word_tree.heading('Std Dev', text='Std Dev', anchor=tk.CENTER)
+        self.word_tree.heading('Tier Range', text='Tier Range', anchor=tk.CENTER)
+        self.word_tree.heading('Example Images', text='Example Images', anchor=tk.W)
         
         # Set column widths
         self.word_tree.column('#0', width=0, stretch=False)
@@ -277,6 +428,10 @@ Tier Distribution:
         self.word_tree.column('Tier Range', width=100)
         self.word_tree.column('Example Images', width=200)
         
+        # Bind click events to column headers for sorting
+        for col in columns:
+            self.word_tree.heading(col, command=lambda c=col: self.sort_word_analysis_by_column(c))
+        
         # Bind events for word analysis
         self.word_tree.bind('<Motion>', self.on_word_tree_hover)
         self.word_tree.bind('<Leave>', self.on_word_tree_leave)
@@ -284,6 +439,10 @@ Tier Distribution:
         # Pack tree and scrollbar
         self.word_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         word_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Track sorting state for word analysis
+        self.word_sort_column = None
+        self.word_sort_reverse = False
         
         # Initial population
         self.refresh_prompt_analysis()
@@ -297,9 +456,6 @@ Tier Distribution:
         for item in self.word_tree.get_children():
             self.word_tree.delete(item)
         
-        # Get sort option
-        sort_option = self.sort_var.get()
-        
         # Get search term
         search_term = self.search_var.get().strip().lower()
         
@@ -308,17 +464,8 @@ Tier Distribution:
             # Use search functionality
             word_data = self.prompt_analyzer.search_words_by_pattern(search_term)
         else:
-            # Get all words with appropriate sorting
-            if sort_option == "average_tier_desc":
-                word_data = self.prompt_analyzer.get_sorted_word_analysis('average_tier', ascending=False)
-            elif sort_option == "average_tier_asc":
-                word_data = self.prompt_analyzer.get_sorted_word_analysis('average_tier', ascending=True)
-            elif sort_option == "frequency_desc":
-                word_data = self.prompt_analyzer.get_sorted_word_analysis('frequency', ascending=False)
-            elif sort_option == "frequency_asc":
-                word_data = self.prompt_analyzer.get_sorted_word_analysis('frequency', ascending=True)
-            else:  # alphabetical
-                word_data = sorted(self.prompt_analyzer.analyze_word_performance().items())
+            # Get all words sorted by average tier (descending) as default
+            word_data = self.prompt_analyzer.get_sorted_word_analysis('average_tier', ascending=False)
         
         # Populate tree
         for word, data in word_data:
@@ -340,6 +487,68 @@ Tier Distribution:
                 tier_range,
                 example_text
             ), tags=(word,))
+    
+    def sort_word_analysis_by_column(self, column):
+        """Sort the word analysis table by the specified column."""
+        # Toggle sort direction if clicking the same column
+        if self.word_sort_column == column:
+            self.word_sort_reverse = not self.word_sort_reverse
+        else:
+            self.word_sort_column = column
+            self.word_sort_reverse = False
+        
+        # Get all items with their values
+        items = []
+        for item in self.word_tree.get_children():
+            values = self.word_tree.item(item, 'values')
+            items.append((item, values))
+        
+        # Define sort key functions for each column
+        def get_sort_key(item_data):
+            values = item_data[1]  # Get the values tuple
+            
+            if column == 'Word':
+                return values[0].lower()  # Sort by word (case-insensitive)
+            elif column == 'Frequency':
+                return int(values[1])
+            elif column == 'Avg Tier':
+                return float(values[2])
+            elif column == 'Std Dev':
+                return float(values[3])
+            elif column == 'Tier Range':
+                # Sort by the first number in the range
+                range_str = values[4]
+                if range_str == "N/A":
+                    return float('-inf')
+                try:
+                    return int(range_str.split()[0])
+                except:
+                    return 0
+            elif column == 'Example Images':
+                return values[5].lower()
+            else:
+                return values[0]  # Default to word
+        
+        # Sort items
+        items.sort(key=get_sort_key, reverse=self.word_sort_reverse)
+        
+        # Update the tree order
+        for index, (item, values) in enumerate(items):
+            self.word_tree.move(item, '', index)
+        
+        # Update column header to show sort direction
+        for col in ('Word', 'Frequency', 'Avg Tier', 'Std Dev', 'Tier Range', 'Example Images'):
+            if col == column:
+                direction = " ↓" if self.word_sort_reverse else " ↑"
+                current_text = self.word_tree.heading(col, 'text')
+                # Remove existing direction indicators
+                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                self.word_tree.heading(col, text=clean_text + direction)
+            else:
+                # Remove direction indicators from other columns
+                current_text = self.word_tree.heading(col, 'text')
+                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                self.word_tree.heading(col, text=clean_text)
     
     def get_example_images_for_word(self, word: str) -> list:
         """Get example images that contain a specific word."""
@@ -422,122 +631,6 @@ Tier Distribution:
                 
             except Exception as e:
                 messagebox.showerror("Export Error", f"Failed to export word analysis: {e}")
-    
-    def create_detail_navigation_buttons(self, nav_frame: tk.Frame, canvas: tk.Canvas):
-        """Create navigation buttons for the image details tab."""
-        def jump_to_top():
-            canvas.yview_moveto(0)
-        
-        def jump_to_bottom():
-            canvas.yview_moveto(1)
-        
-        tk.Button(nav_frame, text="Jump to Top", command=jump_to_top, 
-                 bg=Colors.BUTTON_BG, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
-        tk.Button(nav_frame, text="Jump to Bottom", command=jump_to_bottom, 
-                 bg=Colors.BUTTON_BG, fg=Colors.TEXT_PRIMARY, relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
-        
-        # Add instruction label
-        tk.Label(nav_frame, text="Hover over any image frame to see a large preview →", 
-                font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(side=tk.RIGHT, padx=20)
-    
-    def populate_image_details(self, parent: tk.Frame):
-        """Populate the image details section."""
-        # Sort images by current tier (descending) for better organization
-        sorted_images = sorted(self.data_manager.image_stats.keys(), 
-                              key=lambda x: self.data_manager.get_image_stats(x).get('current_tier', 0), 
-                              reverse=True)
-        
-        for img in sorted_images:
-            stats = self.data_manager.get_image_stats(img)
-            
-            # Create frame for this image
-            img_frame = tk.LabelFrame(parent, text=img, padx=10, pady=5, 
-                                    fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY,
-                                    highlightbackground=Colors.BUTTON_BG, 
-                                    highlightcolor=Colors.BUTTON_HOVER,
-                                    highlightthickness=1, relief=tk.RIDGE, bd=1)
-            img_frame.pack(fill=tk.X, padx=10, pady=5)
-            
-            # Add hover functionality to the frame
-            self.add_hover_to_frame(img_frame, img)
-            
-            # Add image statistics
-            self.add_image_statistics(img_frame, img, stats)
-    
-    def add_hover_to_frame(self, frame: tk.Frame, image_filename: str):
-        """Add hover functionality to a frame and all its children."""
-        def on_enter(event):
-            self.display_preview_image(image_filename)
-            frame.configure(highlightbackground=Colors.BUTTON_HOVER)
-        
-        def on_leave(event):
-            frame.configure(highlightbackground=Colors.BUTTON_BG)
-        
-        # Use the mixin's bind_hover_for_preview for the image preview
-        self.bind_hover_for_preview(frame, image_filename)
-        
-        # Add frame highlighting on top of the preview functionality
-        frame.bind("<Enter>", on_enter)
-        frame.bind("<Leave>", on_leave)
-        
-        # Also bind to all child widgets for highlighting
-        def bind_to_children(widget):
-            for child in widget.winfo_children():
-                child.bind("<Enter>", on_enter)
-                child.bind("<Leave>", on_leave)
-                bind_to_children(child)
-        
-        bind_to_children(frame)
-    
-    def add_image_statistics(self, parent: tk.Frame, img: str, stats: dict):
-        """Add statistics for a single image."""
-        # Basic stats
-        basic_text = (f"Current Tier: {stats.get('current_tier', 0)} | "
-                     f"Votes: {stats.get('votes', 0)} | "
-                     f"Wins: {stats.get('wins', 0)} | "
-                     f"Losses: {stats.get('losses', 0)}")
-        basic_label = tk.Label(parent, text=basic_text, fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        basic_label.pack(anchor=tk.W)
-        
-        # Win rate
-        votes = stats.get('votes', 0)
-        wins = stats.get('wins', 0)
-        win_rate = wins / votes if votes > 0 else 0
-        win_rate_label = tk.Label(parent, text=f"Win Rate: {win_rate:.1%}", 
-                                 fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        win_rate_label.pack(anchor=tk.W)
-        
-        # Tier stability
-        stability = self.ranking_algorithm._calculate_tier_stability(img)
-        stability_label = tk.Label(parent, text=f"Tier Stability (std dev): {stability:.2f}", 
-                                  fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        stability_label.pack(anchor=tk.W)
-        
-        # Display prompt if available - show full prompt
-        prompt = stats.get('prompt')
-        if prompt:
-            prompt_title = tk.Label(parent, text="Prompt:", font=('Arial', 9, 'bold'), 
-                                   fg=Colors.TEXT_SUCCESS, bg=Colors.BG_SECONDARY)
-            prompt_title.pack(anchor=tk.W)
-            
-            # Create a text widget for the full prompt
-            prompt_text = tk.Text(parent, height=4, wrap=tk.WORD, 
-                                bg=Colors.BG_TERTIARY, fg=Colors.TEXT_PRIMARY, 
-                                font=('Arial', 9), relief=tk.FLAT)
-            prompt_text.insert(1.0, prompt)
-            prompt_text.config(state=tk.DISABLED)
-            prompt_text.pack(fill=tk.X, padx=10, pady=2)
-        
-        # Recent matchups
-        matchup_history = stats.get('matchup_history', [])
-        if matchup_history:
-            recent_text = "Recent matchups: "
-            for opponent, won, _ in matchup_history[-5:]:
-                result = "W" if won else "L"
-                recent_text += f"{result} vs {opponent}, "
-            recent_label = tk.Label(parent, text=recent_text[:-2], font=('Arial', 9), 
-                                   fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-            recent_label.pack(anchor=tk.W)
     
     def close_window(self):
         """Handle window closing."""

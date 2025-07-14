@@ -819,7 +819,7 @@ class MainWindow:
             return
         
         if self.rankings_window is None:
-            self.rankings_window = RankingsWindow(self.root, self.data_manager, self.ranking_algorithm)
+            self.rankings_window = RankingsWindow(self.root, self.data_manager, self.ranking_algorithm, self.prompt_analyzer)
         else:
             self.rankings_window.show()
     
