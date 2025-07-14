@@ -530,48 +530,7 @@ class RankingAlgorithm:
             # Different tier comparison
             return f"Left image selected from Tier {tier1} using left weights, right image selected from Tier {tier2} using right weights (tier difference: {tier_diff})"
     
-    def get_tier_distribution_info(self) -> Dict[str, Any]:
-        """
-        Get information about current tier distribution vs expected distribution.
-        
-        Returns:
-            Dictionary containing distribution analysis
-        """
-        if not self.data_manager.image_stats:
-            return {}
-        
-        # Calculate actual tier distribution
-        actual_distribution = defaultdict(int)
-        for stats in self.data_manager.image_stats.values():
-            tier = stats.get('current_tier', 0)
-            actual_distribution[tier] += 1
-        
-        total_images = len(self.data_manager.image_stats)
-        
-        # Calculate expected distribution
-        expected_distribution = {}
-        distribution_analysis = {}
-        
-        for tier in actual_distribution.keys():
-            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
-            expected_count = expected_proportion * total_images
-            actual_count = actual_distribution[tier]
-            
-            expected_distribution[tier] = expected_count
-            distribution_analysis[tier] = {
-                'actual': actual_count,
-                'expected': expected_count,
-                'ratio': actual_count / expected_count if expected_count > 0 else 0,
-                'deviation': actual_count - expected_count
-            }
-        
-        return {
-            'actual_distribution': dict(actual_distribution),
-            'expected_distribution': expected_distribution,
-            'analysis': distribution_analysis,
-            'total_images': total_images
-        }
-    
+      
     def invalidate_cache(self):
         """Invalidate the cached rankings to force recalculation."""
         self._cached_rankings = None

@@ -39,38 +39,6 @@ class Colors:
     BORDER = '#333333'
     SEPARATOR = '#4a4a4a'
 
-# Alternative light theme colors for future use
-class LightColors:
-    """Alternative light theme colors for future use."""
-    
-    # Primary background colors
-    BG_PRIMARY = '#ffffff'
-    BG_SECONDARY = '#f5f5f5'
-    BG_TERTIARY = '#e0e0e0'
-    
-    # Text colors
-    TEXT_PRIMARY = '#000000'
-    TEXT_SECONDARY = '#666666'
-    TEXT_SUCCESS = '#2e7d32'
-    TEXT_ERROR = '#d32f2f'
-    TEXT_INFO = '#1976d2'
-    
-    # Button colors
-    BUTTON_SUCCESS = '#4CAF50'
-    BUTTON_INFO = '#2196F3'
-    BUTTON_WARNING = '#FF9800'
-    BUTTON_SECONDARY = '#9C27B0'
-    BUTTON_NEUTRAL = '#607D8B'
-    BUTTON_DANGER = '#FF5722'
-    
-    # Interactive element colors
-    BUTTON_BG = '#e0e0e0'
-    BUTTON_HOVER = '#d0d0d0'
-    BUTTON_ACTIVE = '#c0c0c0'
-    
-    # Border and separator colors
-    BORDER = '#cccccc'
-    SEPARATOR = '#bbbbbb'
 
 # Application default settings
 class Defaults:
@@ -135,62 +103,6 @@ class Defaults:
         'model', 'seed', 'denoising', 'clip skip'
     ]
 
-# TTK Style configuration for dark theme
-class TTKStyles:
-    """Configuration for ttk widget styling."""
-    
-    @staticmethod
-    def get_treeview_config():
-        """Returns configuration dict for Treeview styling."""
-        return {
-            "Treeview": {
-                "background": Colors.BG_SECONDARY,
-                "foreground": Colors.TEXT_PRIMARY,
-                "fieldbackground": Colors.BG_SECONDARY,
-                "borderwidth": 0,
-                "selectbackground": Colors.BUTTON_HOVER,
-                "selectforeground": Colors.TEXT_PRIMARY
-            },
-            "Treeview.Heading": {
-                "background": Colors.BUTTON_BG,
-                "foreground": Colors.TEXT_PRIMARY,
-                "borderwidth": 1,
-                "relief": "flat",
-                "font": ('Arial', 10, 'bold')
-            }
-        }
-    
-    @staticmethod
-    def get_notebook_config():
-        """Returns configuration dict for Notebook styling."""
-        return {
-            "TNotebook": {
-                "background": Colors.BG_PRIMARY,
-                "borderwidth": 0
-            },
-            "TNotebook.Tab": {
-                "background": Colors.BUTTON_BG,
-                "foreground": Colors.TEXT_PRIMARY,
-                "padding": [20, 10],
-                "borderwidth": 0,
-                "focuscolor": 'none'
-            }
-        }
-    
-    @staticmethod
-    def get_scrollbar_config():
-        """Returns configuration dict for Scrollbar styling."""
-        return {
-            "Vertical.TScrollbar": {
-                "background": Colors.BUTTON_BG,
-                "bordercolor": Colors.BUTTON_BG,
-                "arrowcolor": Colors.TEXT_PRIMARY,
-                "troughcolor": Colors.BG_SECONDARY,
-                "darkcolor": Colors.BUTTON_BG,
-                "lightcolor": Colors.BUTTON_BG,
-                "gripcount": 0
-            }
-        }
 
 # Keyboard shortcuts
 class KeyBindings:

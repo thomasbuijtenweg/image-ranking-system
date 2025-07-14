@@ -121,55 +121,7 @@ class ImageProcessor:
             print(f"Error scanning directory {folder_path}: {e}")
             return []
     
-    def get_image_files_by_pattern(self, folder_path: str, pattern: str = "*") -> List[str]:
-        """
-        Get image files matching a specific pattern (useful for filtering).
         
-        Args:
-            folder_path: Path to scan
-            pattern: Filename pattern to match
-            
-        Returns:
-            List of matching image files
-        """
-        all_files = self.get_image_files(folder_path)
-        if pattern == "*":
-            return all_files
-        
-        return [f for f in all_files if fnmatch.fnmatch(os.path.basename(f), pattern)]
-    
-    def validate_image_files_batch(self, folder_path: str, image_files: List[str], 
-                                  max_workers: int = 4) -> List[str]:
-        """
-        Validate multiple image files in parallel.
-        
-        Args:
-            folder_path: Base folder path
-            image_files: List of relative image file paths
-            max_workers: Maximum number of worker threads
-            
-        Returns:
-            List of valid image files
-        """
-        valid_files = []
-        
-        def validate_single(img_file):
-            img_path = os.path.join(folder_path, img_file)
-            if self.validate_image_file(img_path):
-                return img_file
-            return None
-        
-        # Use thread pool for parallel validation
-        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-            futures = {executor.submit(validate_single, img): img for img in image_files}
-            
-            for future in concurrent.futures.as_completed(futures):
-                result = future.result()
-                if result:
-                    valid_files.append(result)
-        
-        return sorted(valid_files)
-    
     def load_and_resize_image(self, image_path: str, max_width: int, max_height: int) -> Optional[ImageTk.PhotoImage]:
         """
         Load an image and resize it with optimizations for better performance.
@@ -221,52 +173,14 @@ class ImageProcessor:
         """
         return self.metadata_extractor.get_image_metadata(image_path)
     
-    def validate_image_file(self, image_path: str) -> bool:
-        """
-        Validate that a file is a readable image with minimal overhead.
-        """
-        try:
-            # First check file size - skip very small files that are likely not real images
-            file_size = os.path.getsize(image_path)
-            if file_size < 100:  # Less than 100 bytes is probably not a real image
-                return False
-            
-            # Quick validation without full image loading
-            with Image.open(image_path) as img:
-                # Just verify we can open it and get basic info
-                width, height = img.size
-                # Sanity check on dimensions
-                if width < 1 or height < 1 or width > 50000 or height > 50000:
-                    return False
-                return True
-                
-        except Exception:
-            return False
-    
-    def get_image_dimensions(self, image_path: str) -> Optional[Tuple[int, int]]:
-        """
-        Get image dimensions with optimizations.
-        """
-        try:
-            # Use PIL's lazy loading to get dimensions without loading full image
-            with Image.open(image_path) as img:
-                return img.size
-        except Exception:
-            return None
-    
+        
+      
     def clear_file_cache(self):
         """Clear the file cache to free memory."""
         with self._cache_lock:
             self._file_cache.clear()
     
-    def get_cache_stats(self) -> dict:
-        """Get statistics about the file cache."""
-        with self._cache_lock:
-            return {
-                'cached_folders': len(self._file_cache),
-                'total_files_cached': sum(len(data['files']) for data in self._file_cache.values())
-            }
-    
+        
     def cleanup_resources(self):
         """
         Clean up resources and caches.

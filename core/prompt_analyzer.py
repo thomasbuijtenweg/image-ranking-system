@@ -199,19 +199,7 @@ class PromptAnalyzer:
         
         return sorted_words
     
-    def get_top_quality_words(self, limit: int = 20) -> List[Tuple[str, Dict[str, Any]]]:
-        """
-        Get the top words that correlate with highest image quality.
         
-        Args:
-            limit: Maximum number of words to return
-            
-        Returns:
-            List of top quality words with their statistics
-        """
-        all_words = self.get_sorted_word_analysis('average_tier', ascending=False)
-        return all_words[:limit]
-    
     def get_analysis_summary(self) -> Dict[str, Any]:
         """
         Get a summary of the prompt analysis.
@@ -247,24 +235,7 @@ class PromptAnalyzer:
             'avg_words_per_image': avg_words_per_image
         }
     
-    def get_word_tier_breakdown(self, word: str) -> Dict[int, int]:
-        """
-        Get the tier distribution for a specific word.
         
-        Args:
-            word: The word to analyze
-            
-        Returns:
-            Dictionary mapping tier numbers to occurrence counts
-        """
-        word_analysis = self.analyze_word_performance()
-        word_data = word_analysis.get(word.lower())
-        
-        if word_data:
-            return word_data['tier_distribution']
-        
-        return {}
-    
     def search_words_by_pattern(self, pattern: str) -> List[Tuple[str, Dict[str, Any]]]:
         """
         Search for words matching a pattern.
