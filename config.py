@@ -6,37 +6,31 @@ in one place. This makes it easy to modify the appearance or behavior
 of the entire application without hunting through multiple files.
 """
 
-# Dark theme color palette
-class Colors:
-    """Color constants for the dark theme interface."""
-    # Primary background colors
-    BG_PRIMARY = '#1e1e1e'      # Main window background
-    BG_SECONDARY = '#2d2d2d'    # Frame backgrounds
-    BG_TERTIARY = '#3d3d3d'     # Entry fields and image placeholders
-    
-    # Text colors
-    TEXT_PRIMARY = '#ffffff'    # Main text
-    TEXT_SECONDARY = '#999999'  # Secondary/metadata text
-    TEXT_SUCCESS = '#66ff66'    # Success messages
-    TEXT_ERROR = '#ff6666'      # Error messages
-    TEXT_INFO = '#6666ff'       # Information text
-    
-    # Button colors
-    BUTTON_SUCCESS = '#4CAF50'  # Save, Apply, Vote buttons
-    BUTTON_INFO = '#2196F3'     # Load, View buttons
-    BUTTON_WARNING = '#FF9800'  # Rankings button
-    BUTTON_SECONDARY = '#9C27B0' # Stats button
-    BUTTON_NEUTRAL = '#607D8B'  # Settings button
-    BUTTON_DANGER = '#FF5722'   # Delete, Reset buttons
-    
-    # Interactive element colors
-    BUTTON_BG = '#333333'       # Default button background
-    BUTTON_HOVER = '#4a4a4a'    # Button hover state
-    BUTTON_ACTIVE = '#555555'   # Button active state
-    
-    # Border and separator colors
-    BORDER = '#333333'
-    SEPARATOR = '#4a4a4a'
+# Import color constants from separate module
+try:
+    from config.colors import Colors
+except ImportError:
+    # Fallback for when config directory structure isn't available
+    class Colors:
+        BG_PRIMARY = '#1e1e1e'
+        BG_SECONDARY = '#2d2d2d'
+        BG_TERTIARY = '#3d3d3d'
+        TEXT_PRIMARY = '#ffffff'
+        TEXT_SECONDARY = '#999999'
+        TEXT_SUCCESS = '#66ff66'
+        TEXT_ERROR = '#ff6666'
+        TEXT_INFO = '#6666ff'
+        BUTTON_SUCCESS = '#4CAF50'
+        BUTTON_INFO = '#2196F3'
+        BUTTON_WARNING = '#FF9800'
+        BUTTON_SECONDARY = '#9C27B0'
+        BUTTON_NEUTRAL = '#607D8B'
+        BUTTON_DANGER = '#FF5722'
+        BUTTON_BG = '#333333'
+        BUTTON_HOVER = '#4a4a4a'
+        BUTTON_ACTIVE = '#555555'
+        BORDER = '#333333'
+        SEPARATOR = '#4a4a4a'
 
 # Application default settings
 class Defaults:

@@ -5,8 +5,7 @@ This module handles all data persistence operations including:
 - Saving and loading ranking data to/from JSON files
 - Managing image statistics and voting history
 - Providing data validation and migration capabilities
-- Managing separate weights for left and right image selection
-- Managing priority preferences for stability and vote count sorting
+- Delegating weight and preference management to WeightManager
 
 By centralizing data operations here, we can easily modify how data
 is stored (JSON, database, etc.) without changing the rest of the application.
@@ -19,6 +18,7 @@ from typing import Dict, Any, Optional, Tuple
 from collections import defaultdict
 
 from config import Defaults
+from core.weight_manager import WeightManager
 
 
 class DataManager:
@@ -26,12 +26,13 @@ class DataManager:
     Handles all data persistence operations for the ranking system.
     
     This class manages the structure and persistence of all ranking data,
-    including image statistics, voting history, user preferences, 
-    separate selection weights for left and right images, and priority preferences.
+    including image statistics, voting history, and delegates weight/preference
+    management to a specialized WeightManager.
     """
     
     def __init__(self):
         """Initialize the data manager with default values."""
+        self.weight_manager = WeightManager()
         self.reset_data()
     
     def reset_data(self):
@@ -41,68 +42,63 @@ class DataManager:
         self.vote_count = 0
         self.image_stats = {}
         
-        # Separate weights for left and right image selection
-        self.left_weights = Defaults.LEFT_SELECTION_WEIGHTS.copy()
-        self.right_weights = Defaults.RIGHT_SELECTION_WEIGHTS.copy()
-        
-        # Legacy weights property for backward compatibility
-        self.weights = Defaults.SELECTION_WEIGHTS.copy()
-        
-        # Priority preferences for left and right image selection
-        self.left_priority_preferences = Defaults.LEFT_PRIORITY_PREFERENCES.copy()
-        self.right_priority_preferences = Defaults.RIGHT_PRIORITY_PREFERENCES.copy()
-        
-        # Tier distribution parameter for normal distribution calculation
-        self.tier_distribution_std = 1.5  # Default standard deviation
+        # Reset weight manager to defaults
+        self.weight_manager.reset_to_defaults()
         
         # Cached data for performance
         self._last_calculated_rankings = None
         self._last_calculation_vote_count = -1
     
+    # Weight management methods - delegate to WeightManager
     def get_left_weights(self) -> Dict[str, float]:
         """Get the weights used for left image selection."""
-        return self.left_weights.copy()
+        return self.weight_manager.get_left_weights()
     
     def get_right_weights(self) -> Dict[str, float]:
         """Get the weights used for right image selection."""
-        return self.right_weights.copy()
+        return self.weight_manager.get_right_weights()
     
     def set_left_weights(self, weights: Dict[str, float]) -> None:
         """Set the weights used for left image selection."""
-        self.left_weights = weights.copy()
-        # Also update legacy weights property for backward compatibility
-        self.weights = weights.copy()
+        self.weight_manager.set_left_weights(weights)
     
     def set_right_weights(self, weights: Dict[str, float]) -> None:
         """Set the weights used for right image selection."""
-        self.right_weights = weights.copy()
+        self.weight_manager.set_right_weights(weights)
     
     def get_legacy_weights(self) -> Dict[str, float]:
         """Get the legacy weights property (for backward compatibility)."""
-        return self.weights.copy()
+        return self.weight_manager.get_legacy_weights()
     
     def set_legacy_weights(self, weights: Dict[str, float]) -> None:
         """Set the legacy weights property (for backward compatibility)."""
-        self.weights = weights.copy()
-        # When legacy weights are set, apply to both left and right
-        self.left_weights = weights.copy()
-        self.right_weights = weights.copy()
+        self.weight_manager.set_legacy_weights(weights)
     
     def get_left_priority_preferences(self) -> Dict[str, bool]:
         """Get the priority preferences used for left image selection."""
-        return self.left_priority_preferences.copy()
+        return self.weight_manager.get_left_priority_preferences()
     
     def get_right_priority_preferences(self) -> Dict[str, bool]:
         """Get the priority preferences used for right image selection."""
-        return self.right_priority_preferences.copy()
+        return self.weight_manager.get_right_priority_preferences()
     
     def set_left_priority_preferences(self, preferences: Dict[str, bool]) -> None:
         """Set the priority preferences used for left image selection."""
-        self.left_priority_preferences = preferences.copy()
+        self.weight_manager.set_left_priority_preferences(preferences)
     
     def set_right_priority_preferences(self, preferences: Dict[str, bool]) -> None:
         """Set the priority preferences used for right image selection."""
-        self.right_priority_preferences = preferences.copy()
+        self.weight_manager.set_right_priority_preferences(preferences)
+    
+    @property
+    def tier_distribution_std(self) -> float:
+        """Get the tier distribution standard deviation."""
+        return self.weight_manager.get_tier_distribution_std()
+    
+    @tier_distribution_std.setter
+    def tier_distribution_std(self, value: float) -> None:
+        """Set the tier distribution standard deviation."""
+        self.weight_manager.set_tier_distribution_std(value)
     
     def initialize_image_stats(self, image_filename: str) -> None:
         """
@@ -254,15 +250,12 @@ class DataManager:
                 'image_folder': self.image_folder,
                 'vote_count': self.vote_count,
                 'image_stats': self.image_stats,
-                'left_weights': self.left_weights,
-                'right_weights': self.right_weights,
-                'weights': self.weights,  # Keep for backward compatibility
-                'left_priority_preferences': self.left_priority_preferences,
-                'right_priority_preferences': self.right_priority_preferences,
-                'tier_distribution_std': self.tier_distribution_std,
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.3'  # Updated version for priority preferences
+                'version': '1.4'  # Updated version for weight manager integration
             }
+            
+            # Add weight manager data
+            data.update(self.weight_manager.export_to_data())
             
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -298,43 +291,8 @@ class DataManager:
             self.vote_count = data['vote_count']
             self.image_stats = data['image_stats']
             
-            # Load weights with backward compatibility
-            if 'left_weights' in data and 'right_weights' in data:
-                # New format with separate left/right weights
-                self.left_weights = data['left_weights']
-                self.right_weights = data['right_weights']
-                # Also load legacy weights if present
-                if 'weights' in data:
-                    self.weights = data['weights']
-                else:
-                    # Use left weights as legacy weights
-                    self.weights = self.left_weights.copy()
-            elif 'weights' in data:
-                # Old format - use the same weights for both left and right
-                self.weights = data['weights']
-                self.left_weights = data['weights'].copy()
-                self.right_weights = data['weights'].copy()
-            else:
-                # No weights found - use defaults
-                self.weights = Defaults.SELECTION_WEIGHTS.copy()
-                self.left_weights = Defaults.LEFT_SELECTION_WEIGHTS.copy()
-                self.right_weights = Defaults.RIGHT_SELECTION_WEIGHTS.copy()
-            
-            # Load priority preferences with backward compatibility
-            if 'left_priority_preferences' in data and 'right_priority_preferences' in data:
-                # New format with separate left/right priority preferences
-                self.left_priority_preferences = data['left_priority_preferences']
-                self.right_priority_preferences = data['right_priority_preferences']
-            else:
-                # Old format - use defaults
-                self.left_priority_preferences = Defaults.LEFT_PRIORITY_PREFERENCES.copy()
-                self.right_priority_preferences = Defaults.RIGHT_PRIORITY_PREFERENCES.copy()
-            
-            # Load tier distribution parameter (with backward compatibility)
-            if 'tier_distribution_std' in data:
-                self.tier_distribution_std = data['tier_distribution_std']
-            else:
-                self.tier_distribution_std = 1.5  # Default value for older files
+            # Load weight manager data
+            self.weight_manager.load_from_data(data)
             
             # Validate and fix any missing fields in image stats
             for image_filename in self.image_stats:
@@ -373,36 +331,15 @@ class DataManager:
                 if len(stats['tier_history']) != stats['votes'] + 1:  # +1 for initial tier
                     return False, f"Tier history length mismatch for {image_name}"
             
-            # Validate tier distribution parameter
-            if not isinstance(self.tier_distribution_std, (int, float)) or self.tier_distribution_std <= 0:
-                return False, "Invalid tier distribution standard deviation"
-            
-            # Validate weight sets
-            for weight_name, weights in [('left_weights', self.left_weights), 
-                                       ('right_weights', self.right_weights),
-                                       ('legacy_weights', self.weights)]:
-                if not isinstance(weights, dict):
-                    return False, f"Invalid {weight_name} format"
-                
-                required_weight_keys = ['recency', 'low_votes', 'instability', 'tier_size']
-                for key in required_weight_keys:
-                    if key not in weights:
-                        return False, f"Missing weight key '{key}' in {weight_name}"
-                    if not isinstance(weights[key], (int, float)) or weights[key] < 0:
-                        return False, f"Invalid weight value for '{key}' in {weight_name}"
-            
-            # Validate priority preferences
-            for pref_name, preferences in [('left_priority_preferences', self.left_priority_preferences),
-                                         ('right_priority_preferences', self.right_priority_preferences)]:
-                if not isinstance(preferences, dict):
-                    return False, f"Invalid {pref_name} format"
-                
-                required_pref_keys = ['prioritize_high_stability', 'prioritize_high_votes']
-                for key in required_pref_keys:
-                    if key not in preferences:
-                        return False, f"Missing preference key '{key}' in {pref_name}"
-                    if not isinstance(preferences[key], bool):
-                        return False, f"Invalid preference value for '{key}' in {pref_name} (must be boolean)"
+            # Validate weight manager data
+            if not self.weight_manager.validate_weights(self.weight_manager.get_left_weights()):
+                return False, "Invalid left weights"
+            if not self.weight_manager.validate_weights(self.weight_manager.get_right_weights()):
+                return False, "Invalid right weights"
+            if not self.weight_manager.validate_preferences(self.weight_manager.get_left_priority_preferences()):
+                return False, "Invalid left priority preferences"
+            if not self.weight_manager.validate_preferences(self.weight_manager.get_right_priority_preferences()):
+                return False, "Invalid right priority preferences"
             
             return True, ""
             
