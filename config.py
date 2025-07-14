@@ -66,6 +66,18 @@ class Defaults:
     # Legacy weight name for backward compatibility
     SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
     
+    # Priority preferences for left and right image selection
+    # These control whether high or low values are prioritized for stability and votes
+    LEFT_PRIORITY_PREFERENCES = {
+        'prioritize_high_stability': False,  # False = prioritize instability (low stability)
+        'prioritize_high_votes': False       # False = prioritize low vote counts
+    }
+    
+    RIGHT_PRIORITY_PREFERENCES = {
+        'prioritize_high_stability': False,  # False = prioritize instability (low stability) 
+        'prioritize_high_votes': False       # False = prioritize low vote counts
+    }
+    
     # UI behavior settings
     VOTE_DELAY_MS = 500         # Delay before showing next pair after vote
     RESIZE_DEBOUNCE_MS = 300    # Delay before redrawing images after resize

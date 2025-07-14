@@ -3,7 +3,8 @@ Settings window module for the Image Ranking System.
 
 This module implements the settings window that allows users to
 configure the ranking algorithm weights and other preferences.
-Now supports separate weight configuration for left and right image selection.
+Now supports separate weight configuration and priority preferences 
+for left and right image selection.
 """
 
 import tkinter as tk
@@ -19,7 +20,7 @@ class SettingsWindow:
     
     This window allows users to adjust the weights used in the ranking
     algorithm and other system preferences. Now supports separate
-    weight configuration for left and right image selection.
+    weight configuration and priority preferences for left and right image selection.
     """
     
     def __init__(self, parent: tk.Tk, data_manager):
@@ -39,6 +40,10 @@ class SettingsWindow:
         self.left_weight_labels = {}
         self.right_weight_vars = {}
         self.right_weight_labels = {}
+        
+        # Priority preference variables for left and right
+        self.left_preference_vars = {}
+        self.right_preference_vars = {}
         
         # Total weight labels
         self.left_total_weight_label = None
@@ -62,7 +67,7 @@ class SettingsWindow:
         """Create the settings window with all its components."""
         self.window = tk.Toplevel(self.parent)
         self.window.title("Algorithm Settings")
-        self.window.geometry("900x700")  # Wider to accommodate side-by-side weights
+        self.window.geometry("1000x800")  # Even wider to accommodate new controls
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         # Handle window closing
@@ -100,6 +105,7 @@ class SettingsWindow:
         
         # Create sections
         self.create_weight_section(parent)
+        self.create_preference_section(parent)
         self.create_tier_distribution_section(parent)
         
         # Apply button
@@ -160,6 +166,56 @@ class SettingsWindow:
         tk.Button(button_frame, text="Reset to Defaults", command=self.reset_to_defaults,
                  bg=Colors.BUTTON_DANGER, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
     
+    def create_preference_section(self, parent: tk.Frame):
+        """Create the priority preference section with separate left/right controls."""
+        # Preference section frame
+        preference_section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
+        preference_section.pack(fill=tk.X, padx=10, pady=10)
+        
+        # Section title
+        tk.Label(preference_section, text="Priority Preferences", 
+                font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=10)
+        
+        tk.Label(preference_section, text="These preferences determine whether high or low values are prioritized for stability and vote counts.",
+                font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(pady=5)
+        
+        # Main preferences container with side-by-side layout
+        preferences_container = tk.Frame(preference_section, bg=Colors.BG_SECONDARY)
+        preferences_container.pack(padx=20, pady=10, fill=tk.X)
+        
+        # Configure grid for side-by-side layout
+        preferences_container.grid_columnconfigure(0, weight=1, uniform="equal")
+        preferences_container.grid_columnconfigure(1, weight=1, uniform="equal")
+        
+        # Left preferences frame
+        left_pref_frame = tk.Frame(preferences_container, bg=Colors.BG_TERTIARY, relief=tk.RAISED, borderwidth=1)
+        left_pref_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=5)
+        
+        # Right preferences frame
+        right_pref_frame = tk.Frame(preferences_container, bg=Colors.BG_TERTIARY, relief=tk.RAISED, borderwidth=1)
+        right_pref_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=5)
+        
+        # Create preference controls for both sides
+        self.create_side_preference_controls(left_pref_frame, 'left', "Left Image Priority Preferences")
+        self.create_side_preference_controls(right_pref_frame, 'right', "Right Image Priority Preferences")
+        
+        # Global preference controls frame
+        global_pref_controls_frame = tk.Frame(preference_section, bg=Colors.BG_SECONDARY)
+        global_pref_controls_frame.pack(pady=10)
+        
+        # Utility buttons for preferences
+        pref_button_frame = tk.Frame(global_pref_controls_frame, bg=Colors.BG_SECONDARY)
+        pref_button_frame.pack()
+        
+        tk.Button(pref_button_frame, text="Copy Left → Right", command=self.copy_left_preferences_to_right,
+                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(pref_button_frame, text="Copy Right → Left", command=self.copy_right_preferences_to_left,
+                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(pref_button_frame, text="Reset Preferences to Defaults", command=self.reset_preferences_to_defaults,
+                 bg=Colors.BUTTON_DANGER, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+    
     def create_side_weight_controls(self, parent: tk.Frame, side: str, title: str):
         """Create weight controls for one side (left or right)."""
         # Title
@@ -183,8 +239,8 @@ class SettingsWindow:
         # Weight information
         weights_info = [
             ('recency', 'Recency Weight', 'Prioritize images not voted recently'),
-            ('low_votes', 'Low Votes Weight', 'Prioritize images with fewer total votes'),
-            ('instability', 'Instability Weight', 'Prioritize images with unstable tiers'),
+            ('low_votes', 'Vote Count Weight', 'Weight for vote count priority (see preferences below)'),
+            ('instability', 'Stability Weight', 'Weight for stability priority (see preferences below)'),
             ('tier_size', 'Tier Size Weight', 'Prioritize images in over-populated tiers')
         ]
         
@@ -218,6 +274,66 @@ class SettingsWindow:
         normalize_cmd = self.normalize_left_weights if side == 'left' else self.normalize_right_weights
         tk.Button(controls_frame, text=normalize_text, command=normalize_cmd,
                  bg=Colors.BUTTON_SECONDARY, fg='white', relief=tk.FLAT).pack(pady=10)
+    
+    def create_side_preference_controls(self, parent: tk.Frame, side: str, title: str):
+        """Create priority preference controls for one side (left or right)."""
+        # Title
+        tk.Label(parent, text=title, font=('Arial', 12, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(pady=10)
+        
+        # Get appropriate preference variables and current preferences
+        if side == 'left':
+            preference_vars = self.left_preference_vars
+            current_preferences = self.data_manager.get_left_priority_preferences()
+        else:
+            preference_vars = self.right_preference_vars
+            current_preferences = self.data_manager.get_right_priority_preferences()
+        
+        # Preference controls frame
+        controls_frame = tk.Frame(parent, bg=Colors.BG_TERTIARY)
+        controls_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        
+        # Stability preference
+        stability_frame = tk.Frame(controls_frame, bg=Colors.BG_TERTIARY)
+        stability_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(stability_frame, text="Stability Priority:", font=('Arial', 10, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W)
+        
+        current_stability_pref = current_preferences.get('prioritize_high_stability', False)
+        stability_var = tk.BooleanVar(value=current_stability_pref)
+        preference_vars['prioritize_high_stability'] = stability_var
+        
+        stability_checkbox = tk.Checkbutton(stability_frame, 
+                                          text="Prioritize HIGH stability (stable images)", 
+                                          variable=stability_var,
+                                          fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY,
+                                          selectcolor=Colors.BG_PRIMARY, activebackground=Colors.BG_TERTIARY)
+        stability_checkbox.pack(anchor=tk.W, padx=20)
+        
+        tk.Label(stability_frame, text="Unchecked = Prioritize LOW stability (unstable images)", 
+                font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W, padx=20)
+        
+        # Vote count preference
+        votes_frame = tk.Frame(controls_frame, bg=Colors.BG_TERTIARY)
+        votes_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(votes_frame, text="Vote Count Priority:", font=('Arial', 10, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W)
+        
+        current_votes_pref = current_preferences.get('prioritize_high_votes', False)
+        votes_var = tk.BooleanVar(value=current_votes_pref)
+        preference_vars['prioritize_high_votes'] = votes_var
+        
+        votes_checkbox = tk.Checkbutton(votes_frame, 
+                                      text="Prioritize HIGH vote counts (heavily voted images)", 
+                                      variable=votes_var,
+                                      fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY,
+                                      selectcolor=Colors.BG_PRIMARY, activebackground=Colors.BG_TERTIARY)
+        votes_checkbox.pack(anchor=tk.W, padx=20)
+        
+        tk.Label(votes_frame, text="Unchecked = Prioritize LOW vote counts (lightly voted images)", 
+                font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W, padx=20)
     
     def create_individual_weight_control(self, parent: tk.Frame, key: str, title: str, description: str,
                                        weight_vars: Dict, weight_labels: Dict, current_weights: Dict, side: str):
@@ -309,6 +425,22 @@ class SettingsWindow:
                     self.left_weight_labels[key].config(text=f"Current: {value:.2f}")
             self.update_weight_display()
     
+    def copy_left_preferences_to_right(self):
+        """Copy left preferences to right preferences."""
+        if self.left_preference_vars and self.right_preference_vars:
+            for key in self.left_preference_vars:
+                if key in self.right_preference_vars:
+                    value = self.left_preference_vars[key].get()
+                    self.right_preference_vars[key].set(value)
+    
+    def copy_right_preferences_to_left(self):
+        """Copy right preferences to left preferences."""
+        if self.left_preference_vars and self.right_preference_vars:
+            for key in self.right_preference_vars:
+                if key in self.left_preference_vars:
+                    value = self.right_preference_vars[key].get()
+                    self.left_preference_vars[key].set(value)
+    
     def normalize_left_weights(self):
         """Normalize left weights to sum to 1.0."""
         if self.left_weight_vars:
@@ -355,6 +487,22 @@ class SettingsWindow:
                     self.right_weight_labels[key].config(text=f"Current: {default_value:.2f}")
         
         self.update_weight_display()
+    
+    def reset_preferences_to_defaults(self):
+        """Reset both preference sets to default values."""
+        from config import Defaults
+        
+        # Reset left preferences
+        if self.left_preference_vars:
+            for key, default_value in Defaults.LEFT_PRIORITY_PREFERENCES.items():
+                if key in self.left_preference_vars:
+                    self.left_preference_vars[key].set(default_value)
+        
+        # Reset right preferences
+        if self.right_preference_vars:
+            for key, default_value in Defaults.RIGHT_PRIORITY_PREFERENCES.items():
+                if key in self.right_preference_vars:
+                    self.right_preference_vars[key].set(default_value)
     
     def create_tier_distribution_section(self, parent: tk.Frame):
         """Create the tier distribution section."""
@@ -448,7 +596,7 @@ class SettingsWindow:
         messagebox.showinfo("Tier Distribution Preview", preview_text)
     
     def apply_changes(self):
-        """Apply the weight changes and close the window."""
+        """Apply the weight changes and preference changes and close the window."""
         # Update left weights in data manager
         if self.left_weight_vars:
             left_weights = {}
@@ -463,13 +611,27 @@ class SettingsWindow:
                 right_weights[key] = var.get()
             self.data_manager.set_right_weights(right_weights)
         
+        # Update left preferences in data manager
+        if self.left_preference_vars:
+            left_preferences = {}
+            for key, var in self.left_preference_vars.items():
+                left_preferences[key] = var.get()
+            self.data_manager.set_left_priority_preferences(left_preferences)
+        
+        # Update right preferences in data manager
+        if self.right_preference_vars:
+            right_preferences = {}
+            for key, var in self.right_preference_vars.items():
+                right_preferences[key] = var.get()
+            self.data_manager.set_right_priority_preferences(right_preferences)
+        
         # Update tier distribution parameter (ensure it exists)
         if not hasattr(self.data_manager, 'tier_distribution_std'):
             self.data_manager.tier_distribution_std = 1.5  # Set default if missing
         if self.tier_std_var is not None:
             self.data_manager.tier_distribution_std = self.tier_std_var.get()
         
-        messagebox.showinfo("Success", "Settings updated successfully!\n\nLeft and right images will now be selected using their respective weight sets.")
+        messagebox.showinfo("Success", "Settings updated successfully!\n\nLeft and right images will now be selected using their respective weight sets and priority preferences.")
         self.close_window()
     
     def close_window(self):

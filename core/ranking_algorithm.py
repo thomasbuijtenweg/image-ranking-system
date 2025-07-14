@@ -4,14 +4,14 @@ Ranking algorithm module for the Image Ranking System.
 This module implements the intelligent pair selection algorithm that determines
 which images should be compared next. The algorithm considers multiple factors:
 - Recency (how recently an image was voted on)
-- Vote count (prioritizing images with fewer votes)
-- Tier stability (prioritizing images with unstable positions)
+- Vote count (prioritizing images with fewer or more votes based on preference)
+- Tier stability (prioritizing images with unstable or stable positions based on preference)
 - Tier size (prioritizing images in tiers that deviate from expected normal distribution)
 
 The tier size calculation now considers that tiers should follow a normal distribution
 centered at tier 0, with tier 0 being the largest and sizes decreasing as we move away.
 
-Now supports separate weight sets for left and right image selection.
+Now supports separate weight sets and priority preferences for left and right image selection.
 """
 
 import random
@@ -30,7 +30,7 @@ class RankingAlgorithm:
     This class contains the core logic for determining which pairs of images
     should be compared next, based on multiple weighted factors that promote
     efficient and fair ranking convergence. Now supports separate weights
-    for left and right image selection.
+    and priority preferences for left and right image selection.
     """
     
     def __init__(self, data_manager: DataManager):
@@ -287,7 +287,7 @@ class RankingAlgorithm:
     
     def _calculate_priority_scores(self, images: List[str], weight_set: str = 'left') -> Dict[str, float]:
         """
-        Calculate priority scores for each image based on multiple factors.
+        Calculate priority scores for each image based on multiple factors and preferences.
         
         Args:
             images: List of image filenames to calculate scores for
@@ -299,14 +299,18 @@ class RankingAlgorithm:
         if not images:
             return {}
         
-        # Get appropriate weights based on weight_set
+        # Get appropriate weights and preferences based on weight_set
         if weight_set == 'left':
             weights = self.data_manager.get_left_weights()
+            preferences = self.data_manager.get_left_priority_preferences()
         elif weight_set == 'right':
             weights = self.data_manager.get_right_weights()
+            preferences = self.data_manager.get_right_priority_preferences()
         else:
             # Fallback to legacy weights for backward compatibility
             weights = self.data_manager.get_legacy_weights()
+            # Use default preferences if not available
+            preferences = {'prioritize_high_stability': False, 'prioritize_high_votes': False}
         
         # Calculate maximum values for normalization
         max_votes = max(self.data_manager.get_image_stats(img).get('votes', 0) for img in images)
@@ -351,21 +355,34 @@ class RankingAlgorithm:
             recency_score = ((vote_count - last_voted) / (vote_count + 1) 
                            if last_voted >= 0 else 1.0)
             
-            # Low vote score: higher = needs voting more (has fewer total votes)
+            # Vote count score: depends on preference
             votes = stats.get('votes', 0)
-            low_vote_score = 1 - (votes / (max_votes + 1))
+            if preferences.get('prioritize_high_votes', False):
+                # Higher score for more votes
+                vote_score = votes / (max_votes + 1)
+            else:
+                # Higher score for fewer votes (default behavior)
+                vote_score = 1 - (votes / (max_votes + 1))
             
-            # Stability score: higher = less stable (needs more data)
+            # Stability score: depends on preference
             stability = self._calculate_tier_stability(img)
-            stability_score = stability / (max_stability + 0.1)
+            if preferences.get('prioritize_high_stability', False):
+                # Higher score for more stable images (lower standard deviation)
+                stability_score = 1 - (stability / (max_stability + 0.1))
+            else:
+                # Higher score for less stable images (higher standard deviation) - default behavior
+                stability_score = stability / (max_stability + 0.1)
             
             # Tier size score: higher = tier is more over-populated than expected
             current_tier = stats.get('current_tier', 0)
             tier_size_score = tier_size_scores.get(current_tier, 0.0)
             
             # Combined priority score (weighted average)
+            # Note: We use the legacy weight names for backward compatibility
+            # 'low_votes' weight now applies to either low or high votes based on preference
+            # 'instability' weight now applies to either instability or stability based on preference
             priority = (weights['recency'] * recency_score + 
-                       weights['low_votes'] * low_vote_score + 
+                       weights['low_votes'] * vote_score + 
                        weights['instability'] * stability_score +
                        weights['tier_size'] * tier_size_score)
             
@@ -478,6 +495,10 @@ class RankingAlgorithm:
         # Both images have been voted on - explain selection with separate weights
         tier_diff = abs(tier1 - tier2)
         
+        # Get priority preferences to explain selection behavior
+        left_prefs = self.data_manager.get_left_priority_preferences()
+        right_prefs = self.data_manager.get_right_priority_preferences()
+        
         if tier_diff == 0:
             # Same tier comparison
             tier_size = sum(1 for img in self.data_manager.image_stats.keys() 
@@ -487,7 +508,17 @@ class RankingAlgorithm:
             expected_proportion = self._calculate_expected_tier_proportion(tier1, total_images)
             expected_size = expected_proportion * total_images
             
-            explanation = f"Left image (Tier {tier1}) selected using left weights, right image (Tier {tier2}) selected using right weights"
+            explanation = f"Left image (Tier {tier1}) selected using left weights"
+            if left_prefs.get('prioritize_high_stability'):
+                explanation += " (prioritizing stable images)"
+            if left_prefs.get('prioritize_high_votes'):
+                explanation += " (prioritizing high vote counts)"
+            
+            explanation += f", right image (Tier {tier2}) selected using right weights"
+            if right_prefs.get('prioritize_high_stability'):
+                explanation += " (prioritizing stable images)"
+            if right_prefs.get('prioritize_high_votes'):
+                explanation += " (prioritizing high vote counts)"
             
             if tier_size > expected_size * 1.2:  # 20% threshold for "over-populated"
                 explanation += f" - Both from over-populated Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f})"

@@ -6,6 +6,7 @@ This module handles all data persistence operations including:
 - Managing image statistics and voting history
 - Providing data validation and migration capabilities
 - Managing separate weights for left and right image selection
+- Managing priority preferences for stability and vote count sorting
 
 By centralizing data operations here, we can easily modify how data
 is stored (JSON, database, etc.) without changing the rest of the application.
@@ -25,8 +26,8 @@ class DataManager:
     Handles all data persistence operations for the ranking system.
     
     This class manages the structure and persistence of all ranking data,
-    including image statistics, voting history, user preferences, and
-    separate selection weights for left and right images.
+    including image statistics, voting history, user preferences, 
+    separate selection weights for left and right images, and priority preferences.
     """
     
     def __init__(self):
@@ -46,6 +47,10 @@ class DataManager:
         
         # Legacy weights property for backward compatibility
         self.weights = Defaults.SELECTION_WEIGHTS.copy()
+        
+        # Priority preferences for left and right image selection
+        self.left_priority_preferences = Defaults.LEFT_PRIORITY_PREFERENCES.copy()
+        self.right_priority_preferences = Defaults.RIGHT_PRIORITY_PREFERENCES.copy()
         
         # Tier distribution parameter for normal distribution calculation
         self.tier_distribution_std = 1.5  # Default standard deviation
@@ -82,6 +87,22 @@ class DataManager:
         # When legacy weights are set, apply to both left and right
         self.left_weights = weights.copy()
         self.right_weights = weights.copy()
+    
+    def get_left_priority_preferences(self) -> Dict[str, bool]:
+        """Get the priority preferences used for left image selection."""
+        return self.left_priority_preferences.copy()
+    
+    def get_right_priority_preferences(self) -> Dict[str, bool]:
+        """Get the priority preferences used for right image selection."""
+        return self.right_priority_preferences.copy()
+    
+    def set_left_priority_preferences(self, preferences: Dict[str, bool]) -> None:
+        """Set the priority preferences used for left image selection."""
+        self.left_priority_preferences = preferences.copy()
+    
+    def set_right_priority_preferences(self, preferences: Dict[str, bool]) -> None:
+        """Set the priority preferences used for right image selection."""
+        self.right_priority_preferences = preferences.copy()
     
     def initialize_image_stats(self, image_filename: str) -> None:
         """
@@ -236,9 +257,11 @@ class DataManager:
                 'left_weights': self.left_weights,
                 'right_weights': self.right_weights,
                 'weights': self.weights,  # Keep for backward compatibility
+                'left_priority_preferences': self.left_priority_preferences,
+                'right_priority_preferences': self.right_priority_preferences,
                 'tier_distribution_std': self.tier_distribution_std,
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.2'  # Updated version for separate left/right weights
+                'version': '1.3'  # Updated version for priority preferences
             }
             
             with open(filename, 'w', encoding='utf-8') as f:
@@ -296,6 +319,16 @@ class DataManager:
                 self.weights = Defaults.SELECTION_WEIGHTS.copy()
                 self.left_weights = Defaults.LEFT_SELECTION_WEIGHTS.copy()
                 self.right_weights = Defaults.RIGHT_SELECTION_WEIGHTS.copy()
+            
+            # Load priority preferences with backward compatibility
+            if 'left_priority_preferences' in data and 'right_priority_preferences' in data:
+                # New format with separate left/right priority preferences
+                self.left_priority_preferences = data['left_priority_preferences']
+                self.right_priority_preferences = data['right_priority_preferences']
+            else:
+                # Old format - use defaults
+                self.left_priority_preferences = Defaults.LEFT_PRIORITY_PREFERENCES.copy()
+                self.right_priority_preferences = Defaults.RIGHT_PRIORITY_PREFERENCES.copy()
             
             # Load tier distribution parameter (with backward compatibility)
             if 'tier_distribution_std' in data:
@@ -357,6 +390,19 @@ class DataManager:
                         return False, f"Missing weight key '{key}' in {weight_name}"
                     if not isinstance(weights[key], (int, float)) or weights[key] < 0:
                         return False, f"Invalid weight value for '{key}' in {weight_name}"
+            
+            # Validate priority preferences
+            for pref_name, preferences in [('left_priority_preferences', self.left_priority_preferences),
+                                         ('right_priority_preferences', self.right_priority_preferences)]:
+                if not isinstance(preferences, dict):
+                    return False, f"Invalid {pref_name} format"
+                
+                required_pref_keys = ['prioritize_high_stability', 'prioritize_high_votes']
+                for key in required_pref_keys:
+                    if key not in preferences:
+                        return False, f"Missing preference key '{key}' in {pref_name}"
+                    if not isinstance(preferences[key], bool):
+                        return False, f"Invalid preference value for '{key}' in {pref_name} (must be boolean)"
             
             return True, ""
             
