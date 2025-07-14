@@ -7,8 +7,7 @@ This module handles all data persistence operations including:
 - Providing data validation and migration capabilities
 - Delegating weight and preference management to WeightManager
 
-By centralizing data operations here, we can easily modify how data
-is stored (JSON, database, etc.) without changing the rest of the application.
+Now includes performance optimizations and metadata caching.
 """
 
 import json
@@ -41,6 +40,9 @@ class DataManager:
         self.image_folder = ""
         self.vote_count = 0
         self.image_stats = {}
+        
+        # Metadata cache to avoid re-extraction (performance optimization)
+        self.metadata_cache = {}  # filename -> {prompt, display_metadata, last_modified}
         
         # Reset weight manager to defaults
         self.weight_manager.reset_to_defaults()
@@ -136,6 +138,41 @@ class DataManager:
             for field, default_value in required_fields.items():
                 if field not in self.image_stats[image_filename]:
                     self.image_stats[image_filename][field] = default_value
+        
+        # Try to restore metadata from cache (performance optimization)
+        self.restore_metadata_from_cache(image_filename)
+    
+    def restore_metadata_from_cache(self, image_filename: str) -> None:
+        """
+        Restore metadata from cache if available and still valid.
+        
+        Args:
+            image_filename: Name of the image file
+        """
+        if image_filename not in self.metadata_cache:
+            return
+        
+        cached_data = self.metadata_cache[image_filename]
+        
+        # Check if cached metadata is still valid by comparing file modification time
+        try:
+            if self.image_folder:
+                img_path = os.path.join(self.image_folder, image_filename)
+                if os.path.exists(img_path):
+                    current_mtime = os.path.getmtime(img_path)
+                    cached_mtime = cached_data.get('last_modified', 0)
+                    
+                    # If file hasn't been modified since cache, use cached data
+                    if abs(current_mtime - cached_mtime) < 1.0:  # 1 second tolerance
+                        stats = self.image_stats[image_filename]
+                        stats['prompt'] = cached_data.get('prompt')
+                        stats['display_metadata'] = cached_data.get('display_metadata')
+                        return
+        except (OSError, KeyError):
+            pass
+        
+        # Cache is invalid, remove it
+        del self.metadata_cache[image_filename]
     
     def record_vote(self, winner: str, loser: str) -> None:
         """
@@ -184,7 +221,7 @@ class DataManager:
     def set_image_metadata(self, image_filename: str, prompt: Optional[str] = None, 
                           display_metadata: Optional[str] = None) -> None:
         """
-        Set metadata for an image.
+        Set metadata for an image and update cache.
         
         Args:
             image_filename: Name of the image file
@@ -196,6 +233,43 @@ class DataManager:
                 self.image_stats[image_filename]['prompt'] = prompt
             if display_metadata is not None:
                 self.image_stats[image_filename]['display_metadata'] = display_metadata
+            
+            # Update metadata cache for performance
+            self.update_metadata_cache(image_filename, prompt, display_metadata)
+    
+    def update_metadata_cache(self, image_filename: str, prompt: Optional[str] = None, 
+                             display_metadata: Optional[str] = None) -> None:
+        """
+        Update the metadata cache for an image.
+        
+        Args:
+            image_filename: Name of the image file
+            prompt: AI generation prompt (if available)
+            display_metadata: Formatted metadata for display
+        """
+        try:
+            if self.image_folder:
+                img_path = os.path.join(self.image_folder, image_filename)
+                if os.path.exists(img_path):
+                    current_mtime = os.path.getmtime(img_path)
+                    
+                    # Initialize cache entry if it doesn't exist
+                    if image_filename not in self.metadata_cache:
+                        self.metadata_cache[image_filename] = {}
+                    
+                    cache_entry = self.metadata_cache[image_filename]
+                    
+                    # Update cache with new data
+                    if prompt is not None:
+                        cache_entry['prompt'] = prompt
+                    if display_metadata is not None:
+                        cache_entry['display_metadata'] = display_metadata
+                    
+                    cache_entry['last_modified'] = current_mtime
+                    
+        except OSError:
+            # If we can't get file info, don't cache
+            pass
     
     def get_tier_distribution(self) -> Dict[int, int]:
         """
@@ -235,9 +309,54 @@ class DataManager:
             'tier_distribution': self.get_tier_distribution()
         }
     
+    def get_metadata_cache_stats(self) -> Dict[str, int]:
+        """
+        Get statistics about the metadata cache.
+        
+        Returns:
+            Dictionary with cache statistics
+        """
+        total_images = len(self.image_stats)
+        cached_prompts = sum(1 for cache_data in self.metadata_cache.values() 
+                            if cache_data.get('prompt') is not None)
+        cached_metadata = sum(1 for cache_data in self.metadata_cache.values() 
+                             if cache_data.get('display_metadata') is not None)
+        
+        return {
+            'total_images': total_images,
+            'cached_prompts': cached_prompts,
+            'cached_metadata': cached_metadata,
+            'cache_hit_rate_prompts': cached_prompts / max(total_images, 1),
+            'cache_hit_rate_metadata': cached_metadata / max(total_images, 1)
+        }
+    
+    def cleanup_stale_cache_entries(self) -> int:
+        """
+        Remove cache entries for images that no longer exist.
+        
+        Returns:
+            Number of entries removed
+        """
+        if not self.image_folder:
+            return 0
+        
+        removed_count = 0
+        stale_entries = []
+        
+        for image_filename in self.metadata_cache:
+            img_path = os.path.join(self.image_folder, image_filename)
+            if not os.path.exists(img_path):
+                stale_entries.append(image_filename)
+        
+        for entry in stale_entries:
+            del self.metadata_cache[entry]
+            removed_count += 1
+        
+        return removed_count
+    
     def save_to_file(self, filename: str) -> bool:
         """
-        Save all ranking data to a JSON file.
+        Save all ranking data to a JSON file with metadata cache.
         
         Args:
             filename: Path to the output file
@@ -250,8 +369,9 @@ class DataManager:
                 'image_folder': self.image_folder,
                 'vote_count': self.vote_count,
                 'image_stats': self.image_stats,
+                'metadata_cache': self.metadata_cache,  # Include metadata cache
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.4'  # Updated version for weight manager integration
+                'version': '1.5'  # Updated version for metadata caching
             }
             
             # Add weight manager data
@@ -268,7 +388,7 @@ class DataManager:
     
     def load_from_file(self, filename: str) -> Tuple[bool, str]:
         """
-        Load ranking data from a JSON file.
+        Load ranking data from a JSON file with metadata cache support.
         
         Args:
             filename: Path to the input file
@@ -290,6 +410,13 @@ class DataManager:
             self.image_folder = data['image_folder']
             self.vote_count = data['vote_count']
             self.image_stats = data['image_stats']
+            
+            # Load metadata cache if available (performance optimization)
+            if 'metadata_cache' in data:
+                self.metadata_cache = data['metadata_cache']
+                print(f"Loaded metadata cache for {len(self.metadata_cache)} images")
+            else:
+                self.metadata_cache = {}
             
             # Load weight manager data
             self.weight_manager.load_from_data(data)

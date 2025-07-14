@@ -5,10 +5,11 @@ This module implements the primary user interface for image voting,
 including the side-by-side image display, voting controls, and
 integration with all the core system components.
 
-Now supports separate weight-based selection for left and right images.
-
-By separating this UI logic from the core business logic, we make
-the application more maintainable and easier to test.
+Now includes performance optimizations for large image collections:
+- Lazy metadata extraction
+- Background processing
+- Progress feedback
+- Memory management improvements
 """
 
 import tkinter as tk
@@ -16,6 +17,9 @@ from tkinter import ttk, filedialog, messagebox
 from typing import Optional, Tuple
 import os
 import gc
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
 
 from config import Colors, Defaults, KeyBindings
 from core.data_manager import DataManager
@@ -29,12 +33,12 @@ from ui.settings_window import SettingsWindow
 
 class MainWindow:
     """
-    Main application window handling the voting interface.
+    Main application window handling the voting interface with performance optimizations.
     
     This class manages the primary user interface where users compare
     and vote on image pairs. It coordinates between the data manager,
     image processor, and ranking algorithm to provide a smooth voting experience.
-    Now supports separate weight-based selection for left and right images.
+    Now optimized for large collections (10,000+ images).
     """
     
     def __init__(self, root: tk.Tk):
@@ -56,6 +60,11 @@ class MainWindow:
         self.ranking_algorithm = RankingAlgorithm(self.data_manager)
         self.prompt_analyzer = PromptAnalyzer(self.data_manager)
         
+        # Performance optimization: Background processing
+        self.metadata_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="metadata")
+        self.metadata_futures = {}  # Track background metadata extraction
+        self.loading_cancelled = False
+        
         # UI state
         self.current_pair = (None, None)
         self.next_pair = (None, None)
@@ -73,6 +82,11 @@ class MainWindow:
         # Timer references
         self.resize_timer = None
         self.preload_timer = None
+        
+        # Progress tracking
+        self.progress_window = None
+        self.progress_var = None
+        self.progress_label_var = None
         
         # Setup the user interface
         self.setup_dark_theme()
@@ -322,35 +336,200 @@ class MainWindow:
             self.load_images()
     
     def load_images(self):
-        """Load images from the selected folder and its subfolders."""
+        """Load images from the selected folder with optimized performance."""
+        if not self.data_manager.image_folder:
+            return
+            
+        # Quick file scan first (fast)
+        start_time = time.time()
         images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        scan_time = time.time() - start_time
         
         if not images:
             messagebox.showerror("Error", "No images found in selected folder or its subfolders")
             return
         
-        # Update folder label to indicate subfolder search
+        print(f"File scan completed in {scan_time:.2f}s for {len(images)} images")
+        
+        # Update folder label immediately
         folder_name = os.path.basename(self.data_manager.image_folder)
         self.folder_label.config(text=f"Folder: {folder_name} ({len(images)} images including subfolders)")
         
-        # Initialize stats for all images
+        # Show progress window for large collections
+        if len(images) > 100:
+            self.show_progress_window(len(images))
+        
+        # Initialize basic stats for all images (fast - no metadata extraction)
+        processed_count = 0
         for img in images:
             self.data_manager.initialize_image_stats(img)
+            processed_count += 1
             
-            # Extract metadata if not already done
-            stats = self.data_manager.get_image_stats(img)
-            if stats.get('prompt') is None:
-                img_path = os.path.join(self.data_manager.image_folder, img)
-                try:
-                    prompt = self.image_processor.extract_prompt_from_image(img_path)
-                    metadata = self.image_processor.get_image_metadata(img_path)
-                    self.data_manager.set_image_metadata(img, prompt, metadata)
-                except Exception as e:
-                    print(f"Error extracting metadata from {img}: {e}")
+            # Update progress for every 100 images or at the end
+            if processed_count % 100 == 0 or processed_count == len(images):
+                if self.progress_var:
+                    self.progress_var.set(processed_count)
+                    self.progress_label_var.set(f"Initializing: {processed_count}/{len(images)}")
+                    self.root.update_idletasks()
         
-        # Update status and show first pair
-        self.status_bar.config(text=f"Loaded {len(images)} images from folder and subfolders. Click images or use arrow keys (←/→) to vote. Left/right images now selected using separate weights.")
+        # Close progress window
+        if self.progress_window:
+            self.progress_window.destroy()
+            self.progress_window = None
+        
+        # Start background metadata extraction for images that need it
+        self.start_background_metadata_extraction(images)
+        
+        # Update status and show first pair immediately
+        self.status_bar.config(text=f"Loaded {len(images)} images. Metadata extraction running in background. Ready to vote!")
         self.show_next_pair()
+    
+    def start_background_metadata_extraction(self, images):
+        """Start background metadata extraction for images without metadata."""
+        images_needing_metadata = []
+        
+        for img in images:
+            stats = self.data_manager.get_image_stats(img)
+            if stats.get('prompt') is None and stats.get('display_metadata') is None:
+                images_needing_metadata.append(img)
+        
+        if not images_needing_metadata:
+            print("No images need metadata extraction")
+            return
+        
+        print(f"Starting background metadata extraction for {len(images_needing_metadata)} images")
+        
+        # Submit metadata extraction tasks
+        for img in images_needing_metadata:
+            if not self.loading_cancelled:
+                future = self.metadata_executor.submit(self.extract_metadata_for_image, img)
+                self.metadata_futures[future] = img
+        
+        # Start a thread to collect results
+        threading.Thread(target=self.collect_metadata_results, daemon=True).start()
+    
+    def extract_metadata_for_image(self, img_filename):
+        """Extract metadata for a single image (runs in background thread)."""
+        try:
+            img_path = os.path.join(self.data_manager.image_folder, img_filename)
+            
+            # Extract prompt and metadata
+            prompt = self.image_processor.extract_prompt_from_image(img_path)
+            metadata = self.image_processor.get_image_metadata(img_path)
+            
+            return img_filename, prompt, metadata
+            
+        except Exception as e:
+            print(f"Error extracting metadata from {img_filename}: {e}")
+            return img_filename, None, None
+    
+    def collect_metadata_results(self):
+        """Collect metadata extraction results from background threads."""
+        completed_count = 0
+        total_count = len(self.metadata_futures)
+        
+        for future in as_completed(self.metadata_futures):
+            if self.loading_cancelled:
+                break
+                
+            try:
+                img_filename, prompt, metadata = future.result()
+                
+                # Update data manager on main thread
+                self.root.after(0, lambda f=img_filename, p=prompt, m=metadata: 
+                               self.data_manager.set_image_metadata(f, p, m))
+                
+                completed_count += 1
+                
+                # Update status periodically
+                if completed_count % 50 == 0 or completed_count == total_count:
+                    progress_text = f"Background metadata extraction: {completed_count}/{total_count} completed"
+                    self.root.after(0, lambda t=progress_text: self.status_bar.config(text=t))
+                    
+            except Exception as e:
+                print(f"Error collecting metadata result: {e}")
+        
+        # Clear futures dict
+        self.metadata_futures.clear()
+        
+        if not self.loading_cancelled:
+            final_text = f"Metadata extraction complete for {total_count} images. Ready to vote!"
+            self.root.after(0, lambda: self.status_bar.config(text=final_text))
+    
+    def show_progress_window(self, total_images):
+        """Show a progress window for long operations."""
+        self.progress_window = tk.Toplevel(self.root)
+        self.progress_window.title("Loading Images...")
+        self.progress_window.geometry("400x150")
+        self.progress_window.configure(bg=Colors.BG_PRIMARY)
+        self.progress_window.transient(self.root)
+        self.progress_window.grab_set()
+        
+        # Center the window
+        self.progress_window.geometry("+%d+%d" % (
+            self.root.winfo_rootx() + 200,
+            self.root.winfo_rooty() + 200
+        ))
+        
+        # Progress label
+        self.progress_label_var = tk.StringVar(value="Scanning folder...")
+        label = tk.Label(self.progress_window, textvariable=self.progress_label_var,
+                        font=('Arial', 12), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY)
+        label.pack(pady=20)
+        
+        # Progress bar
+        self.progress_var = tk.IntVar()
+        progress_bar = ttk.Progressbar(self.progress_window, variable=self.progress_var,
+                                     maximum=total_images, length=350)
+        progress_bar.pack(pady=10)
+        
+        # Cancel button
+        tk.Button(self.progress_window, text="Cancel", 
+                 command=self.cancel_loading,
+                 bg=Colors.BUTTON_DANGER, fg='white', relief=tk.FLAT).pack(pady=10)
+    
+    def cancel_loading(self):
+        """Cancel the loading process."""
+        self.loading_cancelled = True
+        
+        # Cancel all pending metadata futures
+        for future in self.metadata_futures:
+            future.cancel()
+        self.metadata_futures.clear()
+        
+        if self.progress_window:
+            self.progress_window.destroy()
+            self.progress_window = None
+        
+        self.status_bar.config(text="Loading cancelled")
+    
+    def get_image_metadata_lazy(self, img_filename):
+        """Get metadata for an image, extracting it if not available."""
+        stats = self.data_manager.get_image_stats(img_filename)
+        
+        # If we already have metadata, return it
+        if stats.get('prompt') is not None or stats.get('display_metadata') is not None:
+            return stats.get('prompt'), stats.get('display_metadata')
+        
+        # If metadata extraction is in progress, return None (will be updated later)
+        for future in self.metadata_futures:
+            if self.metadata_futures[future] == img_filename:
+                return None, "Metadata loading..."
+        
+        # If no extraction in progress, extract synchronously for critical images
+        try:
+            img_path = os.path.join(self.data_manager.image_folder, img_filename)
+            prompt = self.image_processor.extract_prompt_from_image(img_path)
+            metadata = self.image_processor.get_image_metadata(img_path)
+            
+            # Update data manager
+            self.data_manager.set_image_metadata(img_filename, prompt, metadata)
+            
+            return prompt, metadata
+            
+        except Exception as e:
+            print(f"Error extracting metadata for {img_filename}: {e}")
+            return None, f"Error: {str(e)}"
     
     def show_next_pair(self):
         """Display the next pair of images for voting."""
@@ -384,7 +563,7 @@ class MainWindow:
         self.left_vote_button.config(state=tk.NORMAL)
         self.right_vote_button.config(state=tk.NORMAL)
         
-        # Update status with explanation (now includes separate weight information)
+        # Update status with explanation
         explanation = self.ranking_algorithm.get_selection_explanation(img1, img2)
         self.status_bar.config(text=explanation)
         
@@ -498,7 +677,7 @@ class MainWindow:
                 self.current_images['right'] = None
     
     def update_image_info(self, filename: str, side: str):
-        """Update the info and metadata labels for an image."""
+        """Update the info and metadata labels for an image with lazy loading."""
         stats = self.data_manager.get_image_stats(filename)
         
         # Calculate individual stability
@@ -511,8 +690,21 @@ class MainWindow:
                     f"Losses: {stats.get('losses', 0)} | "
                     f"Stability: {stability:.2f} {weight_indicator}")
         
-        # Get only the clean main prompt (exclude negative prompts, steps, etc.)
+        # Get prompt with lazy loading - only extract when actually needed
         prompt = stats.get('prompt')
+        if prompt is None:
+            # Extract metadata on-demand for this specific image
+            try:
+                img_path = os.path.join(self.data_manager.image_folder, filename)
+                prompt = self.image_processor.extract_prompt_from_image(img_path)
+                # Also get display metadata while we're at it
+                display_metadata = self.image_processor.get_image_metadata(img_path)
+                self.data_manager.set_image_metadata(filename, prompt, display_metadata)
+            except Exception as e:
+                print(f"Error extracting metadata from {filename}: {e}")
+                prompt = None
+        
+        # Format prompt text
         if prompt:
             # Extract only the main/positive prompt using the prompt analyzer
             main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
@@ -526,7 +718,6 @@ class MainWindow:
         # Update labels with dynamic wraplength
         if side == 'left':
             self.left_info_label.config(text=info_text)
-            # Update wraplength based on current frame width
             try:
                 self.root.update_idletasks()
                 frame_width = self.left_metadata_label.winfo_width()
@@ -538,7 +729,6 @@ class MainWindow:
                 self.left_metadata_label.config(text=prompt_text, wraplength=400)
         else:
             self.right_info_label.config(text=info_text)
-            # Update wraplength based on current frame width
             try:
                 self.root.update_idletasks()
                 frame_width = self.right_metadata_label.winfo_width()
@@ -662,7 +852,6 @@ class MainWindow:
         # Show the stats window and focus on prompt analysis tab
         if self.stats_window is None:
             self.stats_window = StatsWindow(self.root, self.data_manager, self.ranking_algorithm, self.prompt_analyzer)
-            # The stats window will automatically show the prompt analysis tab if available
         else:
             self.stats_window.show()
             # Focus on prompt analysis tab if it exists
@@ -676,12 +865,27 @@ class MainWindow:
             self.settings_window.show()
     
     def on_closing(self):
-        """Handle application closing."""
+        """Handle application closing with cleanup."""
+        # Cancel any ongoing metadata extraction
+        self.loading_cancelled = True
+        
+        # Cancel all pending metadata futures
+        for future in self.metadata_futures:
+            future.cancel()
+        self.metadata_futures.clear()
+        
+        # Shutdown the metadata executor
+        self.metadata_executor.shutdown(wait=False)
+        
         # Cancel any pending timers
         if self.resize_timer:
             self.root.after_cancel(self.resize_timer)
         if self.preload_timer:
             self.root.after_cancel(self.preload_timer)
+        
+        # Close progress window if open
+        if self.progress_window:
+            self.progress_window.destroy()
         
         # Clear all image references
         self.clear_old_images()
