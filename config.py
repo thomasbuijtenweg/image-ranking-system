@@ -147,4 +147,5 @@ class KeyBindings:
     LOAD = ['<Control-o>']
     RANKINGS = ['<Control-r>']
     STATS = ['<Control-t>']
+    PROMPT_ANALYSIS = ['<Control-p>']
     SETTINGS = ['<Control-comma>']

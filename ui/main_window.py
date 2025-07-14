@@ -19,6 +19,7 @@ from config import Colors, Defaults, KeyBindings
 from core.data_manager import DataManager
 from core.image_processor import ImageProcessor
 from core.ranking_algorithm import RankingAlgorithm
+from core.prompt_analyzer import PromptAnalyzer
 from ui.rankings_window import RankingsWindow
 from ui.stats_window import StatsWindow
 from ui.settings_window import SettingsWindow
@@ -50,6 +51,7 @@ class MainWindow:
         self.data_manager = DataManager()
         self.image_processor = ImageProcessor()
         self.ranking_algorithm = RankingAlgorithm(self.data_manager)
+        self.prompt_analyzer = PromptAnalyzer(self.data_manager)
         
         # UI state
         self.current_pair = (None, None)
@@ -163,6 +165,7 @@ class MainWindow:
             ("Load Progress", self.load_data, Colors.BUTTON_INFO),
             ("View Rankings", self.show_rankings, Colors.BUTTON_WARNING),
             ("View Stats", self.show_detailed_stats, Colors.BUTTON_SECONDARY),
+            ("Prompt Analysis", self.show_prompt_analysis, Colors.BUTTON_INFO),
             ("Settings", self.show_settings, Colors.BUTTON_NEUTRAL)
         ]
         
@@ -269,6 +272,9 @@ class MainWindow:
         
         for key in KeyBindings.STATS:
             self.root.bind(key, lambda e: self.show_detailed_stats())
+        
+        for key in KeyBindings.PROMPT_ANALYSIS:
+            self.root.bind(key, lambda e: self.show_prompt_analysis())
         
         for key in KeyBindings.SETTINGS:
             self.root.bind(key, lambda e: self.show_settings())
@@ -620,9 +626,33 @@ class MainWindow:
             return
         
         if self.stats_window is None:
-            self.stats_window = StatsWindow(self.root, self.data_manager, self.ranking_algorithm)
+            self.stats_window = StatsWindow(self.root, self.data_manager, self.ranking_algorithm, self.prompt_analyzer)
         else:
             self.stats_window.show()
+    
+    def show_prompt_analysis(self):
+        """Show the prompt analysis functionality in the stats window."""
+        if not self.data_manager.image_stats:
+            messagebox.showinfo("No Data", "No image data to display. Please load images first.")
+            return
+        
+        # Check if there are any prompts to analyze
+        prompt_count = sum(1 for stats in self.data_manager.image_stats.values() 
+                          if stats.get('prompt'))
+        
+        if prompt_count == 0:
+            messagebox.showinfo("No Prompts", "No AI generation prompts found in the images. "
+                              "Prompt analysis requires images with embedded prompt metadata.")
+            return
+        
+        # Show the stats window and focus on prompt analysis tab
+        if self.stats_window is None:
+            self.stats_window = StatsWindow(self.root, self.data_manager, self.ranking_algorithm, self.prompt_analyzer)
+            # The stats window will automatically show the prompt analysis tab if available
+        else:
+            self.stats_window.show()
+            # Focus on prompt analysis tab if it exists
+            self.stats_window.focus_prompt_analysis_tab()
     
     def show_settings(self):
         """Show the settings window."""
