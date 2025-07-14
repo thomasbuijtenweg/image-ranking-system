@@ -8,7 +8,7 @@ used across multiple windows and components.
 import tkinter as tk
 from tkinter import ttk
 from typing import List, Tuple, Callable, Optional
-from config.colors import Colors
+from config import Colors  # Import from the centralized config
 
 
 def create_button_row(parent: tk.Widget, buttons: List[Tuple[str, Callable, str]], 
