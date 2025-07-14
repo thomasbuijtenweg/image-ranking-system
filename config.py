@@ -51,12 +51,20 @@ class Defaults:
     MAX_PROMPT_DISPLAY_LENGTH = 150
     
     # Ranking algorithm weights (these sum to 1.0)
-    SELECTION_WEIGHTS = {
+    # These are the base weights that will be used for both left and right by default
+    BASE_SELECTION_WEIGHTS = {
         'recency': 0.25,        # How recently an image was voted on
         'low_votes': 0.25,      # Prioritize images with fewer votes
         'instability': 0.25,    # Prioritize images with unstable tier positions
         'tier_size': 0.25       # Prioritize images in crowded tiers
     }
+    
+    # Separate weights for left and right image selection
+    LEFT_SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
+    RIGHT_SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
+    
+    # Legacy weight name for backward compatibility
+    SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
     
     # UI behavior settings
     VOTE_DELAY_MS = 500         # Delay before showing next pair after vote

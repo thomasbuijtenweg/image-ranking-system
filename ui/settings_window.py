@@ -3,6 +3,7 @@ Settings window module for the Image Ranking System.
 
 This module implements the settings window that allows users to
 configure the ranking algorithm weights and other preferences.
+Now supports separate weight configuration for left and right image selection.
 """
 
 import tkinter as tk
@@ -17,7 +18,8 @@ class SettingsWindow:
     Window for configuring system settings and algorithm parameters.
     
     This window allows users to adjust the weights used in the ranking
-    algorithm and other system preferences.
+    algorithm and other system preferences. Now supports separate
+    weight configuration for left and right image selection.
     """
     
     def __init__(self, parent: tk.Tk, data_manager):
@@ -31,10 +33,20 @@ class SettingsWindow:
         self.parent = parent
         self.data_manager = data_manager
         self.window = None
-        self.weight_vars = {}
-        self.weight_labels = {}
-        self.total_weight_label = None
-        self.weight_warning_label = None
+        
+        # Separate weight variables for left and right
+        self.left_weight_vars = {}
+        self.left_weight_labels = {}
+        self.right_weight_vars = {}
+        self.right_weight_labels = {}
+        
+        # Total weight labels
+        self.left_total_weight_label = None
+        self.left_weight_warning_label = None
+        self.right_total_weight_label = None
+        self.right_weight_warning_label = None
+        
+        # Tier distribution variables
         self.tier_std_var = None
         self.tier_std_label = None
     
@@ -50,7 +62,7 @@ class SettingsWindow:
         """Create the settings window with all its components."""
         self.window = tk.Toplevel(self.parent)
         self.window.title("Algorithm Settings")
-        self.window.geometry("600x650")
+        self.window.geometry("900x700")  # Wider to accommodate side-by-side weights
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         # Handle window closing
@@ -96,7 +108,7 @@ class SettingsWindow:
                  bg=Colors.BUTTON_SUCCESS, fg='white', font=('Arial', 12), relief=tk.FLAT).pack(pady=20)
     
     def create_weight_section(self, parent: tk.Frame):
-        """Create the weight adjustment section."""
+        """Create the weight adjustment section with separate left/right controls."""
         # Weight section frame
         weight_section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
         weight_section.pack(fill=tk.X, padx=10, pady=10)
@@ -105,15 +117,244 @@ class SettingsWindow:
         tk.Label(weight_section, text="Selection Weights", 
                 font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=10)
         
-        tk.Label(weight_section, text="These weights determine how images are prioritized for comparison",
+        tk.Label(weight_section, text="These weights determine how images are prioritized for comparison. Left and right images are now selected independently.",
                 font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(pady=5)
         
-        # Weight adjustment frame
-        weights_frame = tk.Frame(weight_section, bg=Colors.BG_SECONDARY)
-        weights_frame.pack(padx=20, pady=10)
+        # Main weights container with side-by-side layout
+        weights_container = tk.Frame(weight_section, bg=Colors.BG_SECONDARY)
+        weights_container.pack(padx=20, pady=10, fill=tk.X)
         
-        # Create weight controls
-        self.create_weight_controls(weights_frame)
+        # Configure grid for side-by-side layout
+        weights_container.grid_columnconfigure(0, weight=1, uniform="equal")
+        weights_container.grid_columnconfigure(1, weight=1, uniform="equal")
+        
+        # Left weights frame
+        left_frame = tk.Frame(weights_container, bg=Colors.BG_TERTIARY, relief=tk.RAISED, borderwidth=1)
+        left_frame.grid(row=0, column=0, sticky="nsew", padx=(0, 5), pady=5)
+        
+        # Right weights frame
+        right_frame = tk.Frame(weights_container, bg=Colors.BG_TERTIARY, relief=tk.RAISED, borderwidth=1)
+        right_frame.grid(row=0, column=1, sticky="nsew", padx=(5, 0), pady=5)
+        
+        # Create weight controls for both sides
+        self.create_side_weight_controls(left_frame, 'left', "Left Image Selection Weights")
+        self.create_side_weight_controls(right_frame, 'right', "Right Image Selection Weights")
+        
+        # Global controls frame
+        global_controls_frame = tk.Frame(weight_section, bg=Colors.BG_SECONDARY)
+        global_controls_frame.pack(pady=10)
+        
+        # Utility buttons
+        button_frame = tk.Frame(global_controls_frame, bg=Colors.BG_SECONDARY)
+        button_frame.pack()
+        
+        tk.Button(button_frame, text="Copy Left → Right", command=self.copy_left_to_right,
+                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(button_frame, text="Copy Right → Left", command=self.copy_right_to_left,
+                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(button_frame, text="Normalize Both", command=self.normalize_both_weights,
+                 bg=Colors.BUTTON_WARNING, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        
+        tk.Button(button_frame, text="Reset to Defaults", command=self.reset_to_defaults,
+                 bg=Colors.BUTTON_DANGER, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+    
+    def create_side_weight_controls(self, parent: tk.Frame, side: str, title: str):
+        """Create weight controls for one side (left or right)."""
+        # Title
+        tk.Label(parent, text=title, font=('Arial', 12, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(pady=10)
+        
+        # Get appropriate weight variables and labels dictionaries
+        if side == 'left':
+            weight_vars = self.left_weight_vars
+            weight_labels = self.left_weight_labels
+            current_weights = self.data_manager.get_left_weights()
+        else:
+            weight_vars = self.right_weight_vars
+            weight_labels = self.right_weight_labels
+            current_weights = self.data_manager.get_right_weights()
+        
+        # Weight controls frame
+        controls_frame = tk.Frame(parent, bg=Colors.BG_TERTIARY)
+        controls_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        
+        # Weight information
+        weights_info = [
+            ('recency', 'Recency Weight', 'Prioritize images not voted recently'),
+            ('low_votes', 'Low Votes Weight', 'Prioritize images with fewer total votes'),
+            ('instability', 'Instability Weight', 'Prioritize images with unstable tiers'),
+            ('tier_size', 'Tier Size Weight', 'Prioritize images in over-populated tiers')
+        ]
+        
+        # Create individual weight controls
+        for key, title, description in weights_info:
+            self.create_individual_weight_control(controls_frame, key, title, description, 
+                                                 weight_vars, weight_labels, current_weights, side)
+        
+        # Total weight display
+        if side == 'left':
+            self.left_total_weight_label = tk.Label(controls_frame, text="Total: 0.00",
+                                                   font=('Arial', 10, 'bold'), 
+                                                   fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY)
+            self.left_total_weight_label.pack(pady=(10, 5))
+            
+            self.left_weight_warning_label = tk.Label(controls_frame, text="", 
+                                                     fg=Colors.TEXT_ERROR, bg=Colors.BG_TERTIARY)
+            self.left_weight_warning_label.pack()
+        else:
+            self.right_total_weight_label = tk.Label(controls_frame, text="Total: 0.00",
+                                                    font=('Arial', 10, 'bold'), 
+                                                    fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY)
+            self.right_total_weight_label.pack(pady=(10, 5))
+            
+            self.right_weight_warning_label = tk.Label(controls_frame, text="", 
+                                                      fg=Colors.TEXT_ERROR, bg=Colors.BG_TERTIARY)
+            self.right_weight_warning_label.pack()
+        
+        # Normalize button for this side
+        normalize_text = f"Normalize {side.title()} Weights"
+        normalize_cmd = self.normalize_left_weights if side == 'left' else self.normalize_right_weights
+        tk.Button(controls_frame, text=normalize_text, command=normalize_cmd,
+                 bg=Colors.BUTTON_SECONDARY, fg='white', relief=tk.FLAT).pack(pady=10)
+    
+    def create_individual_weight_control(self, parent: tk.Frame, key: str, title: str, description: str,
+                                       weight_vars: Dict, weight_labels: Dict, current_weights: Dict, side: str):
+        """Create a single weight control widget."""
+        # Frame for this weight
+        weight_frame = tk.Frame(parent, bg=Colors.BG_TERTIARY)
+        weight_frame.pack(fill=tk.X, pady=5)
+        
+        # Title and description
+        tk.Label(weight_frame, text=title, font=('Arial', 10, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W)
+        tk.Label(weight_frame, text=description, font=('Arial', 8, 'italic'), 
+                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_TERTIARY, wraplength=200).pack(anchor=tk.W)
+        
+        # Current value label
+        current_value = current_weights.get(key, 0.25)
+        value_label = tk.Label(weight_frame, text=f"Current: {current_value:.2f}", 
+                             fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY)
+        value_label.pack(anchor=tk.W)
+        weight_labels[key] = value_label
+        
+        # Slider
+        var = tk.DoubleVar(value=current_value)
+        weight_vars[key] = var
+        
+        slider = tk.Scale(weight_frame, from_=0, to=1, resolution=0.05,
+                        orient=tk.HORIZONTAL, variable=var,
+                        command=lambda v, k=key, s=side: self.update_weight_label(k, s),
+                        bg=Colors.BG_TERTIARY, fg=Colors.TEXT_PRIMARY, 
+                        troughcolor=Colors.BG_PRIMARY, 
+                        activebackground=Colors.BUTTON_SUCCESS if side == 'left' else Colors.BUTTON_INFO,
+                        length=200)
+        slider.pack(fill=tk.X, padx=10)
+    
+    def update_weight_label(self, key: str, side: str):
+        """Update the label showing the current weight value."""
+        if side == 'left':
+            value = self.left_weight_vars[key].get()
+            self.left_weight_labels[key].config(text=f"Current: {value:.2f}")
+        else:
+            value = self.right_weight_vars[key].get()
+            self.right_weight_labels[key].config(text=f"Current: {value:.2f}")
+        
+        self.update_weight_display()
+    
+    def update_weight_display(self):
+        """Update the total weight display and warnings for both sides."""
+        # Update left side
+        if self.left_weight_vars:
+            left_total = sum(var.get() for var in self.left_weight_vars.values())
+            if self.left_total_weight_label:
+                self.left_total_weight_label.config(text=f"Total: {left_total:.2f}")
+            
+            if self.left_weight_warning_label:
+                if abs(left_total - 1.0) > 0.01:
+                    self.left_weight_warning_label.config(text="⚠️ Should sum to 1.0")
+                else:
+                    self.left_weight_warning_label.config(text="✓ Sums to 1.0")
+        
+        # Update right side
+        if self.right_weight_vars:
+            right_total = sum(var.get() for var in self.right_weight_vars.values())
+            if self.right_total_weight_label:
+                self.right_total_weight_label.config(text=f"Total: {right_total:.2f}")
+            
+            if self.right_weight_warning_label:
+                if abs(right_total - 1.0) > 0.01:
+                    self.right_weight_warning_label.config(text="⚠️ Should sum to 1.0")
+                else:
+                    self.right_weight_warning_label.config(text="✓ Sums to 1.0")
+    
+    def copy_left_to_right(self):
+        """Copy left weights to right weights."""
+        if self.left_weight_vars and self.right_weight_vars:
+            for key in self.left_weight_vars:
+                if key in self.right_weight_vars:
+                    value = self.left_weight_vars[key].get()
+                    self.right_weight_vars[key].set(value)
+                    self.right_weight_labels[key].config(text=f"Current: {value:.2f}")
+            self.update_weight_display()
+    
+    def copy_right_to_left(self):
+        """Copy right weights to left weights."""
+        if self.left_weight_vars and self.right_weight_vars:
+            for key in self.right_weight_vars:
+                if key in self.left_weight_vars:
+                    value = self.right_weight_vars[key].get()
+                    self.left_weight_vars[key].set(value)
+                    self.left_weight_labels[key].config(text=f"Current: {value:.2f}")
+            self.update_weight_display()
+    
+    def normalize_left_weights(self):
+        """Normalize left weights to sum to 1.0."""
+        if self.left_weight_vars:
+            total = sum(var.get() for var in self.left_weight_vars.values())
+            if total > 0:
+                for key, var in self.left_weight_vars.items():
+                    new_value = var.get() / total
+                    var.set(new_value)
+                    self.left_weight_labels[key].config(text=f"Current: {new_value:.2f}")
+                self.update_weight_display()
+    
+    def normalize_right_weights(self):
+        """Normalize right weights to sum to 1.0."""
+        if self.right_weight_vars:
+            total = sum(var.get() for var in self.right_weight_vars.values())
+            if total > 0:
+                for key, var in self.right_weight_vars.items():
+                    new_value = var.get() / total
+                    var.set(new_value)
+                    self.right_weight_labels[key].config(text=f"Current: {new_value:.2f}")
+                self.update_weight_display()
+    
+    def normalize_both_weights(self):
+        """Normalize both left and right weights to sum to 1.0."""
+        self.normalize_left_weights()
+        self.normalize_right_weights()
+    
+    def reset_to_defaults(self):
+        """Reset both weight sets to default values."""
+        from config import Defaults
+        
+        # Reset left weights
+        if self.left_weight_vars:
+            for key, default_value in Defaults.LEFT_SELECTION_WEIGHTS.items():
+                if key in self.left_weight_vars:
+                    self.left_weight_vars[key].set(default_value)
+                    self.left_weight_labels[key].config(text=f"Current: {default_value:.2f}")
+        
+        # Reset right weights
+        if self.right_weight_vars:
+            for key, default_value in Defaults.RIGHT_SELECTION_WEIGHTS.items():
+                if key in self.right_weight_vars:
+                    self.right_weight_vars[key].set(default_value)
+                    self.right_weight_labels[key].config(text=f"Current: {default_value:.2f}")
+        
+        self.update_weight_display()
     
     def create_tier_distribution_section(self, parent: tk.Frame):
         """Create the tier distribution section."""
@@ -170,92 +411,11 @@ class SettingsWindow:
                  command=self.preview_distribution,
                  bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(pady=10)
     
-    def create_weight_controls(self, parent: tk.Frame):
-        """Create the weight adjustment controls."""
-        weights_info = [
-            ('recency', 'Recency Weight', 'Higher = prioritize images not voted recently'),
-            ('low_votes', 'Low Votes Weight', 'Higher = prioritize images with fewer total votes'),
-            ('instability', 'Instability Weight', 'Higher = prioritize images with unstable tiers'),
-            ('tier_size', 'Tier Size Weight', 'Higher = prioritize images in over-populated tiers')
-        ]
-        
-        for key, title, description in weights_info:
-            self.create_weight_control(parent, key, title, description)
-        
-        # Total weight label
-        self.total_weight_label = tk.Label(parent, 
-                                         text="Total: 0.00",
-                                         font=('Arial', 10), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        self.total_weight_label.pack(pady=10)
-        
-        # Warning label
-        self.weight_warning_label = tk.Label(parent, text="", fg=Colors.TEXT_ERROR, bg=Colors.BG_SECONDARY)
-        self.weight_warning_label.pack()
-        
-        # Normalize button
-        tk.Button(parent, text="Normalize Weights (make sum = 1.0)",
-                 command=self.normalize_weights, bg=Colors.BUTTON_DANGER, fg='white', relief=tk.FLAT).pack(pady=10)
-    
-    def create_weight_control(self, parent: tk.Frame, key: str, title: str, description: str):
-        """Create a single weight control widget."""
-        # Frame for this weight
-        weight_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY)
-        weight_frame.pack(fill=tk.X, pady=10)
-        
-        # Title and description
-        tk.Label(weight_frame, text=title, font=('Arial', 11, 'bold'), 
-                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
-        tk.Label(weight_frame, text=description, font=('Arial', 9, 'italic'), 
-                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
-        
-        # Current value label
-        current_value = self.data_manager.weights.get(key, 0.25)
-        value_label = tk.Label(weight_frame, text=f"Current: {current_value:.2f}", 
-                             fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        value_label.pack(anchor=tk.W)
-        self.weight_labels[key] = value_label
-        
-        # Slider
-        var = tk.DoubleVar(value=current_value)
-        self.weight_vars[key] = var
-        
-        slider = tk.Scale(weight_frame, from_=0, to=1, resolution=0.05,
-                        orient=tk.HORIZONTAL, variable=var,
-                        command=lambda v, k=key: self.update_weight_label(k),
-                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
-                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_SUCCESS)
-        slider.pack(fill=tk.X, padx=20)
-    
-    def update_weight_label(self, key: str):
-        """Update the label showing the current weight value."""
-        value = self.weight_vars[key].get()
-        self.weight_labels[key].config(text=f"Current: {value:.2f}")
-        self.update_weight_display()
-    
-    def update_weight_display(self):
-        """Update the total weight display and warning."""
-        total = sum(var.get() for var in self.weight_vars.values())
-        self.total_weight_label.config(text=f"Total: {total:.2f}")
-        
-        if abs(total - 1.0) > 0.01:
-            self.weight_warning_label.config(
-                text="⚠️ Weights should sum to 1.0 for balanced selection")
-        else:
-            self.weight_warning_label.config(text="✓ Weights sum to 1.0")
-    
     def update_tier_std_display(self):
         """Update the tier standard deviation display."""
         if self.tier_std_var is not None:
             value = self.tier_std_var.get()
             self.tier_std_label.config(text=f"Current: {value:.2f}")
-    
-    def normalize_weights(self):
-        """Normalize weights to sum to 1.0."""
-        total = sum(var.get() for var in self.weight_vars.values())
-        if total > 0:
-            for var in self.weight_vars.values():
-                var.set(var.get() / total)
-            self.update_weight_display()
     
     def preview_distribution(self):
         """Show a preview of what the tier distribution should look like."""
@@ -289,9 +449,19 @@ class SettingsWindow:
     
     def apply_changes(self):
         """Apply the weight changes and close the window."""
-        # Update weights in data manager
-        for key, var in self.weight_vars.items():
-            self.data_manager.weights[key] = var.get()
+        # Update left weights in data manager
+        if self.left_weight_vars:
+            left_weights = {}
+            for key, var in self.left_weight_vars.items():
+                left_weights[key] = var.get()
+            self.data_manager.set_left_weights(left_weights)
+        
+        # Update right weights in data manager
+        if self.right_weight_vars:
+            right_weights = {}
+            for key, var in self.right_weight_vars.items():
+                right_weights[key] = var.get()
+            self.data_manager.set_right_weights(right_weights)
         
         # Update tier distribution parameter (ensure it exists)
         if not hasattr(self.data_manager, 'tier_distribution_std'):
@@ -299,7 +469,7 @@ class SettingsWindow:
         if self.tier_std_var is not None:
             self.data_manager.tier_distribution_std = self.tier_std_var.get()
         
-        messagebox.showinfo("Success", "Settings updated successfully!")
+        messagebox.showinfo("Success", "Settings updated successfully!\n\nLeft and right images will now be selected using their respective weight sets.")
         self.close_window()
     
     def close_window(self):

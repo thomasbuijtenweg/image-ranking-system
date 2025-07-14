@@ -5,6 +5,8 @@ This module implements the primary user interface for image voting,
 including the side-by-side image display, voting controls, and
 integration with all the core system components.
 
+Now supports separate weight-based selection for left and right images.
+
 By separating this UI logic from the core business logic, we make
 the application more maintainable and easier to test.
 """
@@ -32,6 +34,7 @@ class MainWindow:
     This class manages the primary user interface where users compare
     and vote on image pairs. It coordinates between the data manager,
     image processor, and ranking algorithm to provide a smooth voting experience.
+    Now supports separate weight-based selection for left and right images.
     """
     
     def __init__(self, root: tk.Tk):
@@ -346,7 +349,7 @@ class MainWindow:
                     print(f"Error extracting metadata from {img}: {e}")
         
         # Update status and show first pair
-        self.status_bar.config(text=f"Loaded {len(images)} images. Click images or use arrow keys (←/→) to vote.")
+        self.status_bar.config(text=f"Loaded {len(images)} images. Click images or use arrow keys (←/→) to vote. Left/right images now selected using separate weights.")
         self.show_next_pair()
     
     def show_next_pair(self):
@@ -366,7 +369,7 @@ class MainWindow:
         if self.current_pair[0] and self.current_pair[1]:
             self.previous_pair = self.current_pair
         
-        # Get next pair using ranking algorithm
+        # Get next pair using ranking algorithm with separate weights
         img1, img2 = self.ranking_algorithm.select_next_pair(images, self.previous_pair)
         if not img1 or not img2:
             return
@@ -381,7 +384,7 @@ class MainWindow:
         self.left_vote_button.config(state=tk.NORMAL)
         self.right_vote_button.config(state=tk.NORMAL)
         
-        # Update status with explanation
+        # Update status with explanation (now includes separate weight information)
         explanation = self.ranking_algorithm.get_selection_explanation(img1, img2)
         self.status_bar.config(text=explanation)
         
@@ -501,23 +504,24 @@ class MainWindow:
         # Calculate individual stability
         stability = self.ranking_algorithm._calculate_tier_stability(filename)
         
-        # Create info text
+        # Create info text with indication of selection weights used
+        weight_indicator = "(Left weights)" if side == 'left' else "(Right weights)"
         info_text = (f"Tier: {stats.get('current_tier', 0)} | "
                     f"Wins: {stats.get('wins', 0)} | "
                     f"Losses: {stats.get('losses', 0)} | "
-                    f"Stability: {stability:.2f}")
+                    f"Stability: {stability:.2f} {weight_indicator}")
         
-        # Get prompt or metadata for display - show full prompt
+        # Get only the clean main prompt (exclude negative prompts, steps, etc.)
         prompt = stats.get('prompt')
-        metadata = stats.get('display_metadata')
-        
         if prompt:
-            # Show full prompt with better formatting
-            metadata_text = f"Prompt: {prompt}"
-        elif metadata:
-            metadata_text = metadata
+            # Extract only the main/positive prompt using the prompt analyzer
+            main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
+            if main_prompt:
+                prompt_text = f"Prompt: {main_prompt}"
+            else:
+                prompt_text = "Prompt: (empty or unreadable)"
         else:
-            metadata_text = "No prompt found"
+            prompt_text = "Prompt: No prompt found"
         
         # Update labels with dynamic wraplength
         if side == 'left':
@@ -527,11 +531,11 @@ class MainWindow:
                 self.root.update_idletasks()
                 frame_width = self.left_metadata_label.winfo_width()
                 if frame_width > 100:  # Only update if frame has been rendered
-                    self.left_metadata_label.config(text=metadata_text, wraplength=max(frame_width - 20, 300))
+                    self.left_metadata_label.config(text=prompt_text, wraplength=max(frame_width - 20, 300))
                 else:
-                    self.left_metadata_label.config(text=metadata_text, wraplength=400)
+                    self.left_metadata_label.config(text=prompt_text, wraplength=400)
             except:
-                self.left_metadata_label.config(text=metadata_text, wraplength=400)
+                self.left_metadata_label.config(text=prompt_text, wraplength=400)
         else:
             self.right_info_label.config(text=info_text)
             # Update wraplength based on current frame width
@@ -539,11 +543,11 @@ class MainWindow:
                 self.root.update_idletasks()
                 frame_width = self.right_metadata_label.winfo_width()
                 if frame_width > 100:  # Only update if frame has been rendered
-                    self.right_metadata_label.config(text=metadata_text, wraplength=max(frame_width - 20, 300))
+                    self.right_metadata_label.config(text=prompt_text, wraplength=max(frame_width - 20, 300))
                 else:
-                    self.right_metadata_label.config(text=metadata_text, wraplength=400)
+                    self.right_metadata_label.config(text=prompt_text, wraplength=400)
             except:
-                self.right_metadata_label.config(text=metadata_text, wraplength=400)
+                self.right_metadata_label.config(text=prompt_text, wraplength=400)
     
     def vote(self, side: str):
         """Process a vote for the specified side."""
@@ -604,7 +608,17 @@ class MainWindow:
                 
                 # Update UI
                 self.stats_label.config(text=f"Total votes: {self.data_manager.vote_count}")
-                messagebox.showinfo("Success", f"Data loaded from {filename}")
+                
+                # Check if separate weights were loaded
+                left_weights = self.data_manager.get_left_weights()
+                right_weights = self.data_manager.get_right_weights()
+                weights_message = ""
+                if left_weights != right_weights:
+                    weights_message = "\n\nLoaded separate left and right selection weights."
+                else:
+                    weights_message = "\n\nUsing same weights for both left and right selection."
+                
+                messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}")
             else:
                 messagebox.showerror("Error", f"Could not load data: {error_msg}")
     
