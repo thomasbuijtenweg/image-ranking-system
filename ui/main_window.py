@@ -313,7 +313,7 @@ class MainWindow:
     
     def select_folder(self):
         """Handle folder selection for image loading."""
-        folder = filedialog.askdirectory(title="Select folder containing images")
+        folder = filedialog.askdirectory(title="Select folder containing images (includes subfolders)")
         if folder:
             # Clear old images before loading new ones
             self.clear_old_images()
@@ -322,16 +322,16 @@ class MainWindow:
             self.load_images()
     
     def load_images(self):
-        """Load images from the selected folder."""
+        """Load images from the selected folder and its subfolders."""
         images = self.image_processor.get_image_files(self.data_manager.image_folder)
         
         if not images:
-            messagebox.showerror("Error", "No images found in selected folder")
+            messagebox.showerror("Error", "No images found in selected folder or its subfolders")
             return
         
-        # Update folder label
+        # Update folder label to indicate subfolder search
         folder_name = os.path.basename(self.data_manager.image_folder)
-        self.folder_label.config(text=f"Folder: {folder_name} ({len(images)} images)")
+        self.folder_label.config(text=f"Folder: {folder_name} ({len(images)} images including subfolders)")
         
         # Initialize stats for all images
         for img in images:
@@ -349,7 +349,7 @@ class MainWindow:
                     print(f"Error extracting metadata from {img}: {e}")
         
         # Update status and show first pair
-        self.status_bar.config(text=f"Loaded {len(images)} images. Click images or use arrow keys (←/→) to vote. Left/right images now selected using separate weights.")
+        self.status_bar.config(text=f"Loaded {len(images)} images from folder and subfolders. Click images or use arrow keys (←/→) to vote. Left/right images now selected using separate weights.")
         self.show_next_pair()
     
     def show_next_pair(self):

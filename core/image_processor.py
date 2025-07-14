@@ -35,21 +35,45 @@ class ImageProcessor:
     
     def get_image_files(self, folder_path: str) -> List[str]:
         """
-        Get all supported image files from a folder.
+        Get all supported image files from a folder and its subfolders recursively.
         
         Args:
             folder_path: Path to the folder containing images
             
         Returns:
-            List of image filenames
+            List of image file paths relative to the base folder
         """
         if not os.path.exists(folder_path):
             return []
         
+        image_files = []
+        
         try:
-            files = os.listdir(folder_path)
-            return [f for f in files if f.lower().endswith(self.supported_extensions)]
-        except OSError:
+            # Use os.walk with followlinks=False to avoid infinite loops from circular symlinks
+            for root, dirs, files in os.walk(folder_path, followlinks=False):
+                # Skip hidden directories (optional - you can remove this filter if needed)
+                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                
+                for file in files:
+                    # Skip hidden files (optional - you can remove this filter if needed)
+                    if file.startswith('.'):
+                        continue
+                        
+                    if file.lower().endswith(self.supported_extensions):
+                        # Get relative path from the base folder
+                        full_path = os.path.join(root, file)
+                        relative_path = os.path.relpath(full_path, folder_path)
+                        
+                        # Normalize path separators to forward slashes for consistency
+                        # This ensures consistent storage in JSON files across platforms
+                        relative_path = relative_path.replace(os.sep, '/')
+                        
+                        image_files.append(relative_path)
+            
+            return sorted(image_files)  # Sort for consistent ordering
+            
+        except OSError as e:
+            print(f"Error scanning directory {folder_path}: {e}")
             return []
     
     def load_and_resize_image(self, image_path: str, max_width: int, max_height: int) -> Optional[ImageTk.PhotoImage]:
