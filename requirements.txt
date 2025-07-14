@@ -9,8 +9,11 @@
 # Image processing and display
 Pillow>=9.0.0
 
+# Plotting and visualization
+matplotlib>=3.5.0
+
 # No other external dependencies required!
-# The application uses only Python standard library modules beyond Pillow:
+# The application uses only Python standard library modules beyond Pillow and matplotlib:
 # - tkinter (GUI framework)
 # - json (data persistence)
 # - os (file system operations)

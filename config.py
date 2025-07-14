@@ -25,7 +25,7 @@ class Colors:
     # Button colors
     BUTTON_SUCCESS = '#4CAF50'  # Save, Apply, Vote buttons
     BUTTON_INFO = '#2196F3'     # Load, View buttons
-    BUTTON_WARNING = '#FF9800'  # Rankings button
+    BUTTON_WARNING = '#FF9800'  # Stats button (changed from Rankings)
     BUTTON_SECONDARY = '#9C27B0' # Stats button
     BUTTON_NEUTRAL = '#607D8B'  # Settings button
     BUTTON_DANGER = '#FF5722'   # Delete, Reset buttons
@@ -111,7 +111,6 @@ class KeyBindings:
     VOTE_RIGHT = ['<Right>', '<d>']
     SAVE = ['<Control-s>']
     LOAD = ['<Control-o>']
-    RANKINGS = ['<Control-r>']
     STATS = ['<Control-t>']
     PROMPT_ANALYSIS = ['<Control-p>']
     SETTINGS = ['<Control-comma>']

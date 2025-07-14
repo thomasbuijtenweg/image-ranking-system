@@ -26,7 +26,6 @@ from core.data_manager import DataManager
 from core.image_processor import ImageProcessor
 from core.ranking_algorithm import RankingAlgorithm
 from core.prompt_analyzer import PromptAnalyzer
-from ui.rankings_window import RankingsWindow
 from ui.stats_window import StatsWindow
 from ui.settings_window import SettingsWindow
 
@@ -75,7 +74,6 @@ class MainWindow:
         self.current_images = {'left': None, 'right': None}
         
         # Window references to prevent multiple instances
-        self.rankings_window = None
         self.stats_window = None
         self.settings_window = None
         
@@ -180,8 +178,7 @@ class MainWindow:
             ("Select Image Folder", self.select_folder, Colors.BUTTON_SUCCESS),
             ("Save Progress", self.save_data, Colors.BUTTON_INFO),
             ("Load Progress", self.load_data, Colors.BUTTON_INFO),
-            ("View Rankings", self.show_rankings, Colors.BUTTON_WARNING),
-            ("View Stats", self.show_detailed_stats, Colors.BUTTON_SECONDARY),
+            ("View Stats", self.show_detailed_stats, Colors.BUTTON_WARNING),
             ("Prompt Analysis", self.show_prompt_analysis, Colors.BUTTON_INFO),
             ("Settings", self.show_settings, Colors.BUTTON_NEUTRAL)
         ]
@@ -283,9 +280,6 @@ class MainWindow:
         
         for key in KeyBindings.LOAD:
             self.root.bind(key, lambda e: self.load_data())
-        
-        for key in KeyBindings.RANKINGS:
-            self.root.bind(key, lambda e: self.show_rankings())
         
         for key in KeyBindings.STATS:
             self.root.bind(key, lambda e: self.show_detailed_stats())
@@ -811,17 +805,6 @@ class MainWindow:
                 messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}")
             else:
                 messagebox.showerror("Error", f"Could not load data: {error_msg}")
-    
-    def show_rankings(self):
-        """Show the rankings window."""
-        if not self.data_manager.image_stats:
-            messagebox.showinfo("No Data", "No ranking data to display. Please load images first.")
-            return
-        
-        if self.rankings_window is None:
-            self.rankings_window = RankingsWindow(self.root, self.data_manager, self.ranking_algorithm, self.prompt_analyzer)
-        else:
-            self.rankings_window.show()
     
     def show_detailed_stats(self):
         """Show the detailed statistics window."""
