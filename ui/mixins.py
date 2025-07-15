@@ -203,14 +203,15 @@ class ImagePreviewMixin:
             self.additional_stats_label.config(text=additional_text)
         
         # Update prompt display with full text
-        prompt = stats.get('prompt', '')
-        self.prompt_text.config(state=tk.NORMAL)
-        self.prompt_text.delete(1.0, tk.END)
-        if prompt:
-            self.prompt_text.insert(1.0, prompt)
-        else:
-            self.prompt_text.insert(1.0, "No prompt information available")
-        self.prompt_text.config(state=tk.DISABLED)
+        if self.prompt_text:
+            prompt = stats.get('prompt', '')
+            self.prompt_text.config(state=tk.NORMAL)
+            self.prompt_text.delete(1.0, tk.END)
+            if prompt:
+                self.prompt_text.insert(1.0, prompt)
+            else:
+                self.prompt_text.insert(1.0, "No prompt information available")
+            self.prompt_text.config(state=tk.DISABLED)
     
     def handle_image_load_error(self, filename):
         """
@@ -219,27 +220,33 @@ class ImagePreviewMixin:
         Args:
             filename: Name of the image file that failed to load
         """
-        self.image_label.config(image="", text="Failed to load image")
-        self.image_info_label.config(text=f"Error loading: {filename}")
+        if self.image_label:
+            self.image_label.config(image="", text="Failed to load image")
+        
+        if self.image_info_label:
+            self.image_info_label.config(text=f"Error loading: {filename}")
         
         if hasattr(self, 'additional_stats_label') and self.additional_stats_label:
             self.additional_stats_label.config(text="")
         
-        self.prompt_text.config(state=tk.NORMAL)
-        self.prompt_text.delete(1.0, tk.END)
-        self.prompt_text.insert(1.0, "Error loading image")
-        self.prompt_text.config(state=tk.DISABLED)
+        if self.prompt_text:
+            self.prompt_text.config(state=tk.NORMAL)
+            self.prompt_text.delete(1.0, tk.END)
+            self.prompt_text.insert(1.0, "Error loading image")
+            self.prompt_text.config(state=tk.DISABLED)
+        
         self.current_image = None
     
     def setup_preview_resize_handling(self):
         """Set up resize event handling for the preview area."""
         window_ref = self.window if hasattr(self, 'window') else self.root
-        window_ref.bind('<Configure>', self.on_preview_window_resize)
+        if window_ref:
+            window_ref.bind('<Configure>', self.on_preview_window_resize)
     
     def on_preview_window_resize(self, event):
         """Handle window resize events with debouncing."""
         window_ref = self.window if hasattr(self, 'window') else self.root
-        if event.widget == window_ref:
+        if window_ref and event.widget == window_ref:
             # Cancel previous timer if it exists
             if self.resize_timer:
                 window_ref.after_cancel(self.resize_timer)
@@ -257,22 +264,42 @@ class ImagePreviewMixin:
         # Cancel any pending resize timer
         if self.resize_timer:
             window_ref = self.window if hasattr(self, 'window') else self.root
-            window_ref.after_cancel(self.resize_timer)
+            # Add null check to prevent the error
+            if window_ref and hasattr(window_ref, 'after_cancel'):
+                try:
+                    window_ref.after_cancel(self.resize_timer)
+                except (tk.TclError, AttributeError):
+                    # Window might already be destroyed
+                    pass
+            self.resize_timer = None
         
         # Clear image references
         self.current_image = None
         self.current_displayed_image = None
         
         if self.image_label:
-            self.image_label.config(image="")
+            try:
+                self.image_label.config(image="")
+            except (tk.TclError, AttributeError):
+                # Widget might already be destroyed
+                pass
         
         if hasattr(self, 'prompt_text') and self.prompt_text:
-            self.prompt_text.config(state=tk.NORMAL)
-            self.prompt_text.delete(1.0, tk.END)
+            try:
+                self.prompt_text.config(state=tk.NORMAL)
+                self.prompt_text.delete(1.0, tk.END)
+                self.prompt_text.config(state=tk.DISABLED)
+            except (tk.TclError, AttributeError):
+                # Widget might already be destroyed
+                pass
         
         # Clean up image processor
         if self.image_processor and hasattr(self.image_processor, 'cleanup_resources'):
-            self.image_processor.cleanup_resources()
+            try:
+                self.image_processor.cleanup_resources()
+            except (AttributeError, Exception):
+                # Ignore cleanup errors during shutdown
+                pass
     
     def bind_hover_for_preview(self, widget, image_filename):
         """
@@ -288,15 +315,23 @@ class ImagePreviewMixin:
         def on_leave(event):
             pass  # Keep current image displayed
         
-        # Bind to the widget itself
-        widget.bind("<Enter>", on_enter)
-        widget.bind("<Leave>", on_leave)
-        
-        # Also bind to all child widgets
-        def bind_to_children(parent_widget):
-            for child in parent_widget.winfo_children():
-                child.bind("<Enter>", on_enter)
-                child.bind("<Leave>", on_leave)
-                bind_to_children(child)
-        
-        bind_to_children(widget)
+        try:
+            # Bind to the widget itself
+            widget.bind("<Enter>", on_enter)
+            widget.bind("<Leave>", on_leave)
+            
+            # Also bind to all child widgets
+            def bind_to_children(parent_widget):
+                try:
+                    for child in parent_widget.winfo_children():
+                        child.bind("<Enter>", on_enter)
+                        child.bind("<Leave>", on_leave)
+                        bind_to_children(child)
+                except (tk.TclError, AttributeError):
+                    # Widget might be destroyed or not have children
+                    pass
+            
+            bind_to_children(widget)
+        except (tk.TclError, AttributeError):
+            # Widget might be destroyed, ignore binding errors
+            pass
