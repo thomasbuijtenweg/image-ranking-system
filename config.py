@@ -72,12 +72,14 @@ class Defaults:
     # These control whether high or low values are prioritized for stability and votes
     LEFT_PRIORITY_PREFERENCES = {
         'prioritize_high_stability': False,  # False = prioritize instability (low stability)
-        'prioritize_high_votes': False       # False = prioritize low vote counts
+        'prioritize_high_votes': False,      # False = prioritize low vote counts
+        'prioritize_new_images': False       # False = use normal weight-based selection
     }
     
     RIGHT_PRIORITY_PREFERENCES = {
         'prioritize_high_stability': False,  # False = prioritize instability (low stability) 
-        'prioritize_high_votes': False       # False = prioritize low vote counts
+        'prioritize_high_votes': False,      # False = prioritize low vote counts
+        'prioritize_new_images': False       # False = use normal weight-based selection
     }
     
     # UI behavior settings

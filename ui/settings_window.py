@@ -4,7 +4,7 @@ Settings window module for the Image Ranking System.
 This module implements the settings window that allows users to
 configure the ranking algorithm weights and other preferences.
 Now supports separate weight configuration and priority preferences 
-for left and right image selection.
+for left and right image selection, including new image prioritization.
 """
 
 import tkinter as tk
@@ -20,7 +20,8 @@ class SettingsWindow:
     
     This window allows users to adjust the weights used in the ranking
     algorithm and other system preferences. Now supports separate
-    weight configuration and priority preferences for left and right image selection.
+    weight configuration and priority preferences for left and right image selection,
+    including configurable new image prioritization.
     """
     
     def __init__(self, parent: tk.Tk, data_manager):
@@ -67,7 +68,7 @@ class SettingsWindow:
         """Create the settings window with all its components."""
         self.window = tk.Toplevel(self.parent)
         self.window.title("Algorithm Settings")
-        self.window.geometry("1000x800")  # Even wider to accommodate new controls
+        self.window.geometry("1000x900")  # Increased height for new controls
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         # Handle window closing
@@ -176,7 +177,7 @@ class SettingsWindow:
         tk.Label(preference_section, text="Priority Preferences", 
                 font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=10)
         
-        tk.Label(preference_section, text="These preferences determine whether high or low values are prioritized for stability and vote counts.",
+        tk.Label(preference_section, text="These preferences control new image prioritization and whether high or low values are prioritized for stability and vote counts.",
                 font=('Arial', 10, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(pady=5)
         
         # Main preferences container with side-by-side layout
@@ -292,6 +293,27 @@ class SettingsWindow:
         # Preference controls frame
         controls_frame = tk.Frame(parent, bg=Colors.BG_TERTIARY)
         controls_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
+        
+        # New image prioritization preference
+        new_image_frame = tk.Frame(controls_frame, bg=Colors.BG_TERTIARY)
+        new_image_frame.pack(fill=tk.X, pady=5)
+        
+        tk.Label(new_image_frame, text="New Image Priority:", font=('Arial', 10, 'bold'), 
+                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W)
+        
+        current_new_image_pref = current_preferences.get('prioritize_new_images', False)
+        new_image_var = tk.BooleanVar(value=current_new_image_pref)
+        preference_vars['prioritize_new_images'] = new_image_var
+        
+        new_image_checkbox = tk.Checkbutton(new_image_frame, 
+                                          text="Prioritize new (never-voted) images", 
+                                          variable=new_image_var,
+                                          fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY,
+                                          selectcolor=Colors.BG_PRIMARY, activebackground=Colors.BG_TERTIARY)
+        new_image_checkbox.pack(anchor=tk.W, padx=20)
+        
+        tk.Label(new_image_frame, text="Unchecked = Use normal weight-based selection (recommended)", 
+                font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W, padx=20)
         
         # Stability preference
         stability_frame = tk.Frame(controls_frame, bg=Colors.BG_TERTIARY)
@@ -631,7 +653,7 @@ class SettingsWindow:
         if self.tier_std_var is not None:
             self.data_manager.tier_distribution_std = self.tier_std_var.get()
         
-        messagebox.showinfo("Success", "Settings updated successfully!\n\nLeft and right images will now be selected using their respective weight sets and priority preferences.")
+        messagebox.showinfo("Success", "Settings updated successfully!\n\nLeft and right images will now be selected using their respective weight sets and priority preferences.\n\nNote: New image prioritization is now configurable - check the Priority Preferences section to enable/disable it for each side.")
         self.close_window()
     
     def close_window(self):

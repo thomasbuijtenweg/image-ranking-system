@@ -132,7 +132,7 @@ class WeightManager:
         if not isinstance(preferences, dict):
             return False
         
-        required_keys = ['prioritize_high_stability', 'prioritize_high_votes']
+        required_keys = ['prioritize_high_stability', 'prioritize_high_votes', 'prioritize_new_images']
         for key in required_keys:
             if key not in preferences:
                 return False
@@ -170,10 +170,20 @@ class WeightManager:
         
         # Load priority preferences with backward compatibility
         if 'left_priority_preferences' in data and 'right_priority_preferences' in data:
-            if self.validate_preferences(data['left_priority_preferences']):
-                self.left_priority_preferences = data['left_priority_preferences']
-            if self.validate_preferences(data['right_priority_preferences']):
-                self.right_priority_preferences = data['right_priority_preferences']
+            # Handle the case where old data doesn't have the new 'prioritize_new_images' field
+            left_prefs = data['left_priority_preferences'].copy()
+            right_prefs = data['right_priority_preferences'].copy()
+            
+            # Add missing 'prioritize_new_images' field if not present (backward compatibility)
+            if 'prioritize_new_images' not in left_prefs:
+                left_prefs['prioritize_new_images'] = False
+            if 'prioritize_new_images' not in right_prefs:
+                right_prefs['prioritize_new_images'] = False
+            
+            if self.validate_preferences(left_prefs):
+                self.left_priority_preferences = left_prefs
+            if self.validate_preferences(right_prefs):
+                self.right_priority_preferences = right_prefs
         
         # Load tier distribution parameter
         if 'tier_distribution_std' in data:
