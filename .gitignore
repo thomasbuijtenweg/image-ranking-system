@@ -1,0 +1,93 @@
+# Image Ranking System - Project-specific .gitignore
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+env/
+.venv/
+.env/
+
+# ==========================================
+# IMAGE RANKING SYSTEM SPECIFIC FILES
+# ==========================================
+
+# User ranking data and session files
+*.json
+
+# User image files (prevent accidental commits of personal images)
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.bmp
+*.webp
+*.tiff
+*.tif
+*.svg
+*.ico
+*.avif
+*.heic
+
+# Matplotlib cache and figures (from stats_window.py tier distribution charts)
+.matplotlib/
+*.png
+*.pdf
+*.eps
+*.svg
+
+# Application logs and temporary files
+*.log
+app_log.txt
+ranking_log.txt
+metadata_extraction.log
+
+# Background processing temporary files
+temp_metadata/
+processing_temp/
+*.tmp
+*.temp
+
+# Performance profiling files (from large image collection processing)
+*.prof
+*.lprof
+*.mprofile
+
+# CSV exports from word analysis
+word_analysis_export.csv
+ranking_export.csv
+prompt_analysis_*.csv
+
+# User configuration and settings
+user_settings.json
+app_config.json
+last_session.json
+algorithm_weights.json
+
+# Backup files that might be created during data save/load
+*.bak
+*.backup
+ranking_backup_*.json
+
+# Development and testing artifacts
+scratch/
+dev_test/
+debug_output/
+test_data/
+
+# Package distribution files
+build/
+dist/
+*.egg-info/
+
+# Documentation builds (if added later)
+docs/_build/
+
+# Coverage and testing
+.coverage
+htmlcov/
+.pytest_cache/
+.tox/
