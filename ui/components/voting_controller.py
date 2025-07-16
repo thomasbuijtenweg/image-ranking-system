@@ -119,6 +119,11 @@ class VotingController:
         if self.data_manager.image_folder == "":
             return
         
+        # Safety check - ensure vote buttons exist
+        if self.left_vote_button is None or self.right_vote_button is None:
+            print("Warning: Vote buttons not created yet")
+            return
+        
         # Get available images
         images = self.image_processor.get_image_files(self.data_manager.image_folder)
         if len(images) < 2:
@@ -184,6 +189,11 @@ class VotingController:
         if not self.current_pair[0] or not self.current_pair[1]:
             return
         
+        # Safety check - ensure vote buttons exist
+        if self.left_vote_button is None or self.right_vote_button is None:
+            print("Warning: Vote buttons not created yet")
+            return
+        
         winner = self.current_pair[0] if side == 'left' else self.current_pair[1]
         loser = self.current_pair[1] if side == 'left' else self.current_pair[0]
         
@@ -223,10 +233,10 @@ class VotingController:
         
         # Voting shortcuts
         for key in KeyBindings.VOTE_LEFT:
-            self.parent.bind(key, lambda e: self.vote('left') if self.left_vote_button['state'] == tk.NORMAL else None)
+            self.parent.bind(key, lambda e: self.vote('left') if self.left_vote_button and self.left_vote_button['state'] == tk.NORMAL else None)
         
         for key in KeyBindings.VOTE_RIGHT:
-            self.parent.bind(key, lambda e: self.vote('right') if self.right_vote_button['state'] == tk.NORMAL else None)
+            self.parent.bind(key, lambda e: self.vote('right') if self.right_vote_button and self.right_vote_button['state'] == tk.NORMAL else None)
     
     def reset_voting_state(self) -> None:
         """Reset voting state when loading new images."""

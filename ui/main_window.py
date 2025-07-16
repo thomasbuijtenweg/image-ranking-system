@@ -115,6 +115,10 @@ class MainWindow:
             self.image_display
         )
         
+        # Create vote buttons now that frames exist
+        left_frame, right_frame = self.image_display.get_frames()
+        self.voting_controller.create_vote_buttons(left_frame, right_frame)
+        
         # Setup UI references for various components
         self.folder_manager.set_ui_references(ui_refs['folder_label'], ui_refs['status_bar'])
         self.voting_controller.set_ui_references(ui_refs['status_bar'], ui_refs['stats_label'])

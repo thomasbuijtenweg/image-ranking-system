@@ -44,6 +44,10 @@ class ImageDisplayController:
         self.right_info_label = None
         self.right_metadata_label = None
         
+        # Store references to the left and right frames for vote button creation
+        self.left_frame = None
+        self.right_frame = None
+        
         # Current displayed images (keep references to prevent garbage collection)
         self.current_images = {'left': None, 'right': None}
         
@@ -69,12 +73,12 @@ class ImageDisplayController:
         parent.grid_columnconfigure(2, weight=1, uniform="equal", minsize=400)
         parent.grid_rowconfigure(0, weight=1, minsize=500)
         
-        # Create left and right image frames
-        self._create_single_image_frame(parent, 'left', 0)
+        # Create left and right image frames and store references
+        self.left_frame = self._create_single_image_frame(parent, 'left', 0)
         self._create_vs_label(parent)
-        self._create_single_image_frame(parent, 'right', 2)
+        self.right_frame = self._create_single_image_frame(parent, 'right', 2)
     
-    def _create_single_image_frame(self, parent: tk.Frame, side: str, column: int) -> None:
+    def _create_single_image_frame(self, parent: tk.Frame, side: str, column: int) -> tk.Frame:
         """Create an image display frame for one side of the comparison."""
         frame = tk.Frame(parent, relief=tk.RAISED, borderwidth=2, bg=Colors.BG_SECONDARY)
         frame.grid(row=0, column=column, sticky="nsew", padx=5)
@@ -84,6 +88,7 @@ class ImageDisplayController:
         frame.grid_rowconfigure(0, weight=1, minsize=400)     # Image - expandable with minimum
         frame.grid_rowconfigure(1, weight=0, minsize=30)     # Info - fixed minimum
         frame.grid_rowconfigure(2, weight=0, minsize=60)     # Metadata - fixed minimum
+        frame.grid_rowconfigure(3, weight=0, minsize=60)     # Vote button - fixed minimum
         
         # Image display label - expandable, takes most space
         image_label = tk.Label(frame, text="No image", 
@@ -110,6 +115,18 @@ class ImageDisplayController:
             self.right_image_label = image_label
             self.right_info_label = info_label
             self.right_metadata_label = metadata_label
+        
+        # Return the frame so it can be stored
+        return frame
+    
+    def get_frames(self) -> tuple:
+        """
+        Get references to the left and right frames.
+        
+        Returns:
+            Tuple of (left_frame, right_frame)
+        """
+        return self.left_frame, self.right_frame
     
     def _create_vs_label(self, parent: tk.Frame) -> None:
         """Create the VS label in the center of the main frame."""
