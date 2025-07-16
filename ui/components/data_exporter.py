@@ -1,9 +1,4 @@
-"""
-Data exporter component for the Image Ranking System.
-
-This module handles exporting various types of data from the system,
-including word analysis, image statistics, and rankings.
-"""
+"""Data exporter for the Image Ranking System."""
 
 import csv
 import os
@@ -12,37 +7,15 @@ from typing import Dict, List, Any, Optional
 
 
 class DataExporter:
-    """
-    Handles data export functionality for the statistics system.
-    
-    This component provides various export options for different
-    types of data from the ranking system.
-    """
+    """Handles data export functionality for the statistics system."""
     
     def __init__(self, data_manager, prompt_analyzer, ranking_algorithm):
-        """
-        Initialize the data exporter.
-        
-        Args:
-            data_manager: DataManager instance
-            prompt_analyzer: PromptAnalyzer instance
-            ranking_algorithm: RankingAlgorithm instance
-        """
         self.data_manager = data_manager
         self.prompt_analyzer = prompt_analyzer
         self.ranking_algorithm = ranking_algorithm
     
     def export_word_analysis(self, parent_window=None) -> bool:
-        """
-        Export word analysis data to CSV file.
-        
-        Args:
-            parent_window: Parent window for dialog
-            
-        Returns:
-            True if export successful, False otherwise
-        """
-        # Check if there are any prompts to analyze
+        """Export word analysis data to CSV file."""
         if not self._has_prompt_data():
             messagebox.showinfo("No Data", "No prompt data available for analysis.")
             return False
@@ -67,13 +40,11 @@ class DataExporter:
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 
-                # Write header
                 writer.writerow([
                     'Word', 'Frequency', 'Average Tier', 'Std Deviation', 
                     'Min Tier', 'Max Tier', 'Is Rare', 'Example Images'
                 ])
                 
-                # Sort by average tier (descending)
                 sorted_words = sorted(word_analysis.items(), 
                                     key=lambda x: x[1]['average_tier'], reverse=True)
                 
@@ -91,7 +62,7 @@ class DataExporter:
                         min_tier,
                         max_tier,
                         data['is_rare'],
-                        "; ".join(example_images[:5])  # Include up to 5 examples
+                        "; ".join(example_images[:5])
                     ])
             
             messagebox.showinfo("Export Complete", f"Word analysis exported to {filename}")
@@ -102,15 +73,7 @@ class DataExporter:
             return False
     
     def export_image_statistics(self, parent_window=None) -> bool:
-        """
-        Export image statistics to CSV file.
-        
-        Args:
-            parent_window: Parent window for dialog
-            
-        Returns:
-            True if export successful, False otherwise
-        """
+        """Export image statistics to CSV file."""
         if not self.data_manager.image_stats:
             messagebox.showinfo("No Data", "No image statistics available to export.")
             return False
@@ -129,13 +92,11 @@ class DataExporter:
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 
-                # Write header
                 writer.writerow([
                     'Image Name', 'Current Tier', 'Total Votes', 'Wins', 'Losses', 
                     'Win Rate', 'Stability', 'Last Voted', 'Has Prompt', 'Prompt Preview'
                 ])
                 
-                # Get all images and their stats
                 all_images = []
                 for img_name, stats in self.data_manager.image_stats.items():
                     votes = stats.get('votes', 0)
@@ -150,14 +111,12 @@ class DataExporter:
                     
                     last_voted = stats.get('last_voted', -1)
                     
-                    # Format last voted
                     if last_voted == -1:
                         last_voted_str = "Never"
                     else:
                         votes_ago = self.data_manager.vote_count - last_voted
                         last_voted_str = f"{votes_ago} votes ago" if votes_ago > 0 else "Current"
                     
-                    # Get prompt info
                     prompt = stats.get('prompt', '')
                     has_prompt = bool(prompt)
                     prompt_preview = ""
@@ -182,10 +141,8 @@ class DataExporter:
                         prompt_preview
                     ])
                 
-                # Sort by current tier (descending)
                 all_images.sort(key=lambda x: x[1], reverse=True)
                 
-                # Write data
                 for img_data in all_images:
                     writer.writerow(img_data)
             
@@ -197,15 +154,7 @@ class DataExporter:
             return False
     
     def export_tier_distribution(self, parent_window=None) -> bool:
-        """
-        Export tier distribution data to CSV file.
-        
-        Args:
-            parent_window: Parent window for dialog
-            
-        Returns:
-            True if export successful, False otherwise
-        """
+        """Export tier distribution data to CSV file."""
         tier_distribution = self.data_manager.get_tier_distribution()
         
         if not tier_distribution:
@@ -226,13 +175,10 @@ class DataExporter:
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 
-                # Write header
                 writer.writerow(['Tier', 'Image Count', 'Percentage'])
                 
-                # Calculate total for percentages
                 total_images = sum(tier_distribution.values())
                 
-                # Sort by tier
                 sorted_tiers = sorted(tier_distribution.items())
                 
                 for tier, count in sorted_tiers:
@@ -251,15 +197,7 @@ class DataExporter:
             return False
     
     def export_ranking_summary(self, parent_window=None) -> bool:
-        """
-        Export a comprehensive ranking summary to CSV file.
-        
-        Args:
-            parent_window: Parent window for dialog
-            
-        Returns:
-            True if export successful, False otherwise
-        """
+        """Export a comprehensive ranking summary to CSV file."""
         if not self.data_manager.image_stats:
             messagebox.showinfo("No Data", "No ranking data available to export.")
             return False
@@ -275,35 +213,31 @@ class DataExporter:
             return False
         
         try:
-            # Get comprehensive rankings
             rankings = self.ranking_algorithm.calculate_all_rankings()
             
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 
-                # Write overall statistics header
                 overall_stats = self.data_manager.get_overall_statistics()
                 writer.writerow(['=== OVERALL STATISTICS ==='])
                 writer.writerow(['Total Images', overall_stats['total_images']])
                 writer.writerow(['Total Votes', overall_stats['total_votes']])
                 writer.writerow(['Average Votes per Image', f"{overall_stats['avg_votes_per_image']:.1f}"])
-                writer.writerow([])  # Empty row
+                writer.writerow([])
                 
-                # Write tier distribution
                 writer.writerow(['=== TIER DISTRIBUTION ==='])
                 writer.writerow(['Tier', 'Image Count'])
                 tier_distribution = overall_stats['tier_distribution']
                 for tier in sorted(tier_distribution.keys()):
                     count = tier_distribution[tier]
                     writer.writerow([f"{tier:+d}" if tier != 0 else "0", count])
-                writer.writerow([])  # Empty row
+                writer.writerow([])
                 
-                # Write top images by tier
                 writer.writerow(['=== TOP IMAGES BY TIER ==='])
                 writer.writerow(['Rank', 'Image Name', 'Tier', 'Votes', 'Win Rate', 'Stability'])
                 
                 tier_ranking = rankings['current_tier']
-                for rank, (img_name, metrics) in enumerate(tier_ranking[:50], 1):  # Top 50
+                for rank, (img_name, metrics) in enumerate(tier_ranking[:50], 1):
                     writer.writerow([
                         rank,
                         img_name,
@@ -321,15 +255,7 @@ class DataExporter:
             return False
     
     def _get_example_images_for_word(self, word: str) -> List[str]:
-        """
-        Get example images that contain a specific word.
-        
-        Args:
-            word: Word to search for
-            
-        Returns:
-            List of image filenames containing the word
-        """
+        """Get example images that contain a specific word."""
         example_images = []
         word_lower = word.lower()
         
@@ -342,7 +268,7 @@ class DataExporter:
                         words = self.prompt_analyzer.extract_words(main_prompt)
                         if word_lower in words:
                             example_images.append(image_name)
-                            if len(example_images) >= 10:  # Limit for performance
+                            if len(example_images) >= 10:
                                 break
                     except:
                         continue
@@ -352,47 +278,27 @@ class DataExporter:
         return example_images
     
     def _has_prompt_data(self) -> bool:
-        """
-        Check if there is any prompt data available.
-        
-        Returns:
-            True if prompt data exists, False otherwise
-        """
+        """Check if there is any prompt data available."""
         for stats in self.data_manager.image_stats.values():
             if stats.get('prompt'):
                 return True
         return False
     
     def get_export_options(self) -> Dict[str, str]:
-        """
-        Get available export options.
-        
-        Returns:
-            Dictionary mapping export type to description
-        """
+        """Get available export options."""
         options = {
             'image_statistics': 'Export individual image statistics',
             'tier_distribution': 'Export tier distribution summary',
             'ranking_summary': 'Export comprehensive ranking summary'
         }
         
-        # Only include word analysis if prompt data is available
         if self._has_prompt_data():
             options['word_analysis'] = 'Export word analysis data (words, frequencies, tiers)'
         
         return options
     
     def export_by_type(self, export_type: str, parent_window=None) -> bool:
-        """
-        Export data by type.
-        
-        Args:
-            export_type: Type of export ('word_analysis', 'image_statistics', etc.)
-            parent_window: Parent window for dialog
-            
-        Returns:
-            True if export successful, False otherwise
-        """
+        """Export data by type."""
         try:
             if export_type == 'word_analysis':
                 return self.export_word_analysis(parent_window)
@@ -410,24 +316,11 @@ class DataExporter:
             return False
     
     def get_available_exports(self) -> List[str]:
-        """
-        Get list of available export types.
-        
-        Returns:
-            List of export type keys
-        """
+        """Get list of available export types."""
         return list(self.get_export_options().keys())
     
     def validate_export_data(self, export_type: str) -> bool:
-        """
-        Validate that data exists for the specified export type.
-        
-        Args:
-            export_type: Type of export to validate
-            
-        Returns:
-            True if data exists, False otherwise
-        """
+        """Validate that data exists for the specified export type."""
         if export_type == 'word_analysis':
             return self._has_prompt_data()
         elif export_type in ['image_statistics', 'tier_distribution', 'ranking_summary']:

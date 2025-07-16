@@ -1,11 +1,4 @@
-"""
-Statistics window module for the Image Ranking System.
-
-This module implements the detailed statistics window that shows
-comprehensive information about individual images and overall
-system performance. Now refactored to use specialized components
-for better maintainability and separation of concerns.
-"""
+"""Statistics window for the Image Ranking System."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -20,24 +13,9 @@ from ui.components.stats_table import StatsTable
 
 
 class StatsWindow(ImagePreviewMixin):
-    """
-    Window for displaying detailed statistics about the ranking system.
-    
-    This window provides comprehensive statistics using specialized components
-    for chart generation, data export, prompt analysis, and table display.
-    """
+    """Window for displaying detailed statistics about the ranking system."""
     
     def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm, prompt_analyzer):
-        """
-        Initialize the statistics window.
-        
-        Args:
-            parent: Parent window
-            data_manager: DataManager instance
-            ranking_algorithm: RankingAlgorithm instance
-            prompt_analyzer: PromptAnalyzer instance
-        """
-        # Initialize the mixin
         ImagePreviewMixin.__init__(self)
         
         self.parent = parent
@@ -47,14 +25,13 @@ class StatsWindow(ImagePreviewMixin):
         self.window = None
         self.notebook = None
         
-        # Initialize specialized components
         self.chart_generator = ChartGenerator(data_manager)
         self.data_exporter = DataExporter(data_manager, prompt_analyzer, ranking_algorithm)
         self.stats_table = StatsTable(data_manager, ranking_algorithm, prompt_analyzer)
         self.prompt_analyzer_ui = PromptAnalyzerUI(data_manager, prompt_analyzer)
     
     def show(self):
-        """Show the statistics window, creating it if necessary."""
+        """Show the statistics window."""
         if self.window is None or not self.window.winfo_exists():
             self.create_window()
         else:
@@ -62,17 +39,15 @@ class StatsWindow(ImagePreviewMixin):
             self.window.focus_force()
     
     def focus_prompt_analysis_tab(self):
-        """Focus on the prompt analysis tab if it exists."""
+        """Focus on the prompt analysis tab."""
         if self.notebook:
-            # Find the prompt analysis tab and select it
             for i in range(self.notebook.index("end")):
                 if "Prompt Analysis" in self.notebook.tab(i, "text"):
                     self.notebook.select(i)
                     break
     
     def create_window(self):
-        """Create the statistics window with all its components."""
-        # Import here to avoid circular imports
+        """Create the statistics window."""
         from core.image_processor import ImageProcessor
         self.image_processor = ImageProcessor()
         
@@ -82,48 +57,38 @@ class StatsWindow(ImagePreviewMixin):
         self.window.minsize(1200, 600)
         self.window.configure(bg=Colors.BG_PRIMARY)
         
-        # Handle window closing
         self.window.protocol("WM_DELETE_WINDOW", self.close_window)
         
-        # Setup resize handling from mixin
         self.setup_preview_resize_handling()
         
-        # Create main frame
         main_frame = tk.Frame(self.window, bg=Colors.BG_PRIMARY)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Configure main frame grid - 50% stats table, 50% image preview
-        main_frame.grid_columnconfigure(0, weight=1, minsize=700)  # Stats table
-        main_frame.grid_columnconfigure(1, weight=1, minsize=700)  # Image preview
+        main_frame.grid_columnconfigure(0, weight=1, minsize=700)
+        main_frame.grid_columnconfigure(1, weight=1, minsize=700)
         main_frame.grid_rowconfigure(0, weight=1)
         
-        # Create notebook for different tabs
         self.notebook = ttk.Notebook(main_frame)
         self.notebook.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
         
-        # Create image preview area using mixin
         preview_frame = self.create_image_preview_area(main_frame, include_additional_stats=True)
         preview_frame.grid(row=0, column=1, sticky="nsew")
         
-        # Create the main statistics table tab
         self.create_main_stats_tab(self.notebook)
         
-        # Create prompt analysis tab if there are prompts to analyze
         prompt_count = sum(1 for stats in self.data_manager.image_stats.values() 
                           if stats.get('prompt'))
         if prompt_count > 0:
             self.create_prompt_analysis_tab(self.notebook)
     
     def create_main_stats_tab(self, notebook: ttk.Notebook):
-        """Create the main statistics tab using the StatsTable component."""
+        """Create the main statistics tab."""
         frame = tk.Frame(notebook, bg=Colors.BG_SECONDARY)
         notebook.add(frame, text="Image Statistics")
         
-        # Create header with overall statistics
         header_frame = tk.Frame(frame, bg=Colors.BG_SECONDARY)
         header_frame.pack(fill=tk.X, padx=10, pady=5)
         
-        # Calculate and display overall statistics
         overall_stats = self.data_manager.get_overall_statistics()
         overall_text = (f"Total Images: {overall_stats['total_images']} | "
                        f"Total Votes: {overall_stats['total_votes']} | "
@@ -132,49 +97,40 @@ class StatsWindow(ImagePreviewMixin):
         tk.Label(header_frame, text=overall_text, font=('Arial', 12, 'bold'), 
                 fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        # Create tier distribution chart using ChartGenerator component
         chart_frame = tk.Frame(frame, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
         chart_frame.pack(fill=tk.X, padx=10, pady=5)
         self.chart_generator.create_tier_distribution_chart(chart_frame)
         
-        # Instructions
         instruction_text = "Click column headers to sort • Hover over any row to see image preview"
         tk.Label(header_frame, text=instruction_text, font=('Arial', 10, 'italic'), 
                 fg=Colors.TEXT_INFO, bg=Colors.BG_SECONDARY).pack(anchor=tk.W, pady=(5, 0))
         
-        # Create the statistics table using StatsTable component
         self.stats_table.create_stats_table(frame)
         
-        # Set up hover callbacks for image preview
         self.stats_table.set_hover_callback(self.display_preview_image)
-        self.stats_table.set_leave_callback(lambda: None)  # Keep current image displayed
+        self.stats_table.set_leave_callback(lambda: None)
     
     def create_prompt_analysis_tab(self, notebook: ttk.Notebook):
-        """Create the prompt analysis tab using the PromptAnalyzerUI component."""
+        """Create the prompt analysis tab."""
         frame = tk.Frame(notebook, bg=Colors.BG_SECONDARY)
         notebook.add(frame, text="Prompt Analysis")
         
-        # Use PromptAnalyzerUI component to create the tab content
         self.prompt_analyzer_ui.create_prompt_analysis_tab(frame)
         
-        # Set up callbacks for image preview and export
         self.prompt_analyzer_ui.set_hover_callback(self.display_preview_image)
-        self.prompt_analyzer_ui.set_leave_callback(lambda: None)  # Keep current image displayed
+        self.prompt_analyzer_ui.set_leave_callback(lambda: None)
         self.prompt_analyzer_ui.set_export_callback(self.export_word_analysis)
     
     def export_word_analysis(self):
-        """Export word analysis using DataExporter component."""
+        """Export word analysis."""
         self.data_exporter.export_word_analysis(self.window)
     
     def refresh_stats(self):
         """Refresh all statistics displays."""
-        # Refresh the stats table
         if hasattr(self, 'stats_table'):
             self.stats_table.refresh_table()
         
-        # Refresh the chart
         if hasattr(self, 'chart_generator'):
-            # Find the chart frame and refresh it
             for widget in self.window.winfo_children():
                 if isinstance(widget, tk.Frame):
                     for child in widget.winfo_children():
@@ -185,23 +141,16 @@ class StatsWindow(ImagePreviewMixin):
                                     if hasattr(frame_child, 'winfo_children'):
                                         for chart_candidate in frame_child.winfo_children():
                                             if isinstance(chart_candidate, tk.Frame):
-                                                # This might be the chart frame
                                                 try:
                                                     self.chart_generator.refresh_chart(chart_candidate)
                                                 except:
                                                     pass
         
-        # Refresh the prompt analysis
         if hasattr(self, 'prompt_analyzer_ui'):
             self.prompt_analyzer_ui.refresh_analysis()
     
     def get_stats_summary(self):
-        """
-        Get a summary of the current statistics.
-        
-        Returns:
-            Dictionary with statistics summary
-        """
+        """Get a summary of the current statistics."""
         summary = {
             'overall_stats': self.data_manager.get_overall_statistics(),
             'chart_data': self.chart_generator.get_chart_data_summary() if hasattr(self, 'chart_generator') else {},
@@ -211,12 +160,10 @@ class StatsWindow(ImagePreviewMixin):
         return summary
     
     def export_all_data(self):
-        """Export all available data using the DataExporter component."""
+        """Export all available data."""
         if hasattr(self, 'data_exporter'):
-            # Show a menu of export options
             export_options = self.data_exporter.get_export_options()
             
-            # Create a simple dialog for export options
             dialog = tk.Toplevel(self.window)
             dialog.title("Export Data")
             dialog.geometry("400x300")
@@ -224,7 +171,6 @@ class StatsWindow(ImagePreviewMixin):
             dialog.transient(self.window)
             dialog.grab_set()
             
-            # Center the dialog
             dialog.geometry("+%d+%d" % (
                 self.window.winfo_rootx() + 200,
                 self.window.winfo_rooty() + 200
@@ -234,7 +180,6 @@ class StatsWindow(ImagePreviewMixin):
                     font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, 
                     bg=Colors.BG_PRIMARY).pack(pady=10)
             
-            # Export buttons
             for export_type, description in export_options.items():
                 btn = tk.Button(dialog, text=description, 
                               command=lambda t=export_type: self._export_and_close(t, dialog),
@@ -242,7 +187,6 @@ class StatsWindow(ImagePreviewMixin):
                               wraplength=300, justify=tk.LEFT)
                 btn.pack(pady=5, padx=20, fill=tk.X)
             
-            # Close button
             tk.Button(dialog, text="Cancel", command=dialog.destroy,
                      bg=Colors.BUTTON_NEUTRAL, fg='white', relief=tk.FLAT).pack(pady=10)
     
@@ -252,8 +196,7 @@ class StatsWindow(ImagePreviewMixin):
         self.data_exporter.export_by_type(export_type, self.window)
     
     def close_window(self):
-        """Handle window closing with proper cleanup."""
-        # Clean up components
+        """Handle window closing with cleanup."""
         if hasattr(self, 'chart_generator'):
             self.chart_generator.cleanup_chart()
         
@@ -263,7 +206,6 @@ class StatsWindow(ImagePreviewMixin):
         if hasattr(self, 'prompt_analyzer_ui'):
             self.prompt_analyzer_ui.cleanup()
         
-        # Clean up preview resources using mixin
         self.cleanup_preview_resources()
         
         if self.window:

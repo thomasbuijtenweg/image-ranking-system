@@ -1,14 +1,4 @@
-"""
-Data management module for the Image Ranking System.
-
-This module handles all data persistence operations including:
-- Saving and loading ranking data to/from JSON files
-- Managing image statistics and voting history
-- Providing data validation and migration capabilities
-- Delegating weight and preference management to WeightManager
-
-Now includes performance optimizations and metadata caching.
-"""
+"""Data management for the Image Ranking System."""
 
 import json
 import os
@@ -21,94 +11,62 @@ from core.weight_manager import WeightManager
 
 
 class DataManager:
-    """
-    Handles all data persistence operations for the ranking system.
-    
-    This class manages the structure and persistence of all ranking data,
-    including image statistics, voting history, and delegates weight/preference
-    management to a specialized WeightManager.
-    """
+    """Handles data persistence and ranking statistics."""
     
     def __init__(self):
-        """Initialize the data manager with default values."""
         self.weight_manager = WeightManager()
         self.reset_data()
     
     def reset_data(self):
         """Reset all data to initial state."""
-        # Core application state
         self.image_folder = ""
         self.vote_count = 0
         self.image_stats = {}
-        
-        # Metadata cache to avoid re-extraction (performance optimization)
-        self.metadata_cache = {}  # filename -> {prompt, display_metadata, last_modified}
-        
-        # Reset weight manager to defaults
+        self.metadata_cache = {}
         self.weight_manager.reset_to_defaults()
-        
-        # Cached data for performance
         self._last_calculated_rankings = None
         self._last_calculation_vote_count = -1
     
-    # Weight management methods - delegate to WeightManager
     def get_left_weights(self) -> Dict[str, float]:
-        """Get the weights used for left image selection."""
         return self.weight_manager.get_left_weights()
     
     def get_right_weights(self) -> Dict[str, float]:
-        """Get the weights used for right image selection."""
         return self.weight_manager.get_right_weights()
     
     def set_left_weights(self, weights: Dict[str, float]) -> None:
-        """Set the weights used for left image selection."""
         self.weight_manager.set_left_weights(weights)
     
     def set_right_weights(self, weights: Dict[str, float]) -> None:
-        """Set the weights used for right image selection."""
         self.weight_manager.set_right_weights(weights)
     
     def get_legacy_weights(self) -> Dict[str, float]:
-        """Get the legacy weights property (for backward compatibility)."""
         return self.weight_manager.get_legacy_weights()
     
     def set_legacy_weights(self, weights: Dict[str, float]) -> None:
-        """Set the legacy weights property (for backward compatibility)."""
         self.weight_manager.set_legacy_weights(weights)
     
     def get_left_priority_preferences(self) -> Dict[str, bool]:
-        """Get the priority preferences used for left image selection."""
         return self.weight_manager.get_left_priority_preferences()
     
     def get_right_priority_preferences(self) -> Dict[str, bool]:
-        """Get the priority preferences used for right image selection."""
         return self.weight_manager.get_right_priority_preferences()
     
     def set_left_priority_preferences(self, preferences: Dict[str, bool]) -> None:
-        """Set the priority preferences used for left image selection."""
         self.weight_manager.set_left_priority_preferences(preferences)
     
     def set_right_priority_preferences(self, preferences: Dict[str, bool]) -> None:
-        """Set the priority preferences used for right image selection."""
         self.weight_manager.set_right_priority_preferences(preferences)
     
     @property
     def tier_distribution_std(self) -> float:
-        """Get the tier distribution standard deviation."""
         return self.weight_manager.get_tier_distribution_std()
     
     @tier_distribution_std.setter
     def tier_distribution_std(self, value: float) -> None:
-        """Set the tier distribution standard deviation."""
         self.weight_manager.set_tier_distribution_std(value)
     
     def initialize_image_stats(self, image_filename: str) -> None:
-        """
-        Initialize statistics for a new image.
-        
-        Args:
-            image_filename: Name of the image file
-        """
+        """Initialize stats for a new image."""
         if image_filename not in self.image_stats:
             self.image_stats[image_filename] = {
                 'votes': 0,
@@ -122,7 +80,6 @@ class DataManager:
                 'display_metadata': None
             }
         else:
-            # Ensure existing stats have all required fields (for backward compatibility)
             required_fields = {
                 'votes': 0,
                 'wins': 0,
@@ -139,22 +96,15 @@ class DataManager:
                 if field not in self.image_stats[image_filename]:
                     self.image_stats[image_filename][field] = default_value
         
-        # Try to restore metadata from cache (performance optimization)
         self.restore_metadata_from_cache(image_filename)
     
     def restore_metadata_from_cache(self, image_filename: str) -> None:
-        """
-        Restore metadata from cache if available and still valid.
-        
-        Args:
-            image_filename: Name of the image file
-        """
+        """Restore metadata from cache if available and valid."""
         if image_filename not in self.metadata_cache:
             return
         
         cached_data = self.metadata_cache[image_filename]
         
-        # Check if cached metadata is still valid by comparing file modification time
         try:
             if self.image_folder:
                 img_path = os.path.join(self.image_folder, image_filename)
@@ -162,8 +112,7 @@ class DataManager:
                     current_mtime = os.path.getmtime(img_path)
                     cached_mtime = cached_data.get('last_modified', 0)
                     
-                    # If file hasn't been modified since cache, use cached data
-                    if abs(current_mtime - cached_mtime) < 1.0:  # 1 second tolerance
+                    if abs(current_mtime - cached_mtime) < 1.0:
                         stats = self.image_stats[image_filename]
                         stats['prompt'] = cached_data.get('prompt')
                         stats['display_metadata'] = cached_data.get('display_metadata')
@@ -171,21 +120,12 @@ class DataManager:
         except (OSError, KeyError):
             pass
         
-        # Cache is invalid, remove it
         del self.metadata_cache[image_filename]
     
     def record_vote(self, winner: str, loser: str) -> None:
-        """
-        Record a vote between two images.
-        
-        Args:
-            winner: Filename of the winning image
-            loser: Filename of the losing image
-        """
-        # Increment global vote count
+        """Record a vote between two images."""
         self.vote_count += 1
         
-        # Update winner statistics
         winner_stats = self.image_stats[winner]
         winner_stats['votes'] += 1
         winner_stats['wins'] += 1
@@ -194,7 +134,6 @@ class DataManager:
         winner_stats['last_voted'] = self.vote_count
         winner_stats['matchup_history'].append((loser, True, self.vote_count))
         
-        # Update loser statistics
         loser_stats = self.image_stats[loser]
         loser_stats['votes'] += 1
         loser_stats['losses'] += 1
@@ -203,63 +142,37 @@ class DataManager:
         loser_stats['last_voted'] = self.vote_count
         loser_stats['matchup_history'].append((winner, False, self.vote_count))
         
-        # Invalidate cached rankings
         self._last_calculated_rankings = None
     
     def get_image_stats(self, image_filename: str) -> Dict[str, Any]:
-        """
-        Get statistics for a specific image.
-        
-        Args:
-            image_filename: Name of the image file
-            
-        Returns:
-            Dictionary containing all statistics for the image
-        """
+        """Get statistics for a specific image."""
         return self.image_stats.get(image_filename, {})
     
     def set_image_metadata(self, image_filename: str, prompt: Optional[str] = None, 
                           display_metadata: Optional[str] = None) -> None:
-        """
-        Set metadata for an image and update cache.
-        
-        Args:
-            image_filename: Name of the image file
-            prompt: AI generation prompt (if available)
-            display_metadata: Formatted metadata for display
-        """
+        """Set metadata for an image and update cache."""
         if image_filename in self.image_stats:
             if prompt is not None:
                 self.image_stats[image_filename]['prompt'] = prompt
             if display_metadata is not None:
                 self.image_stats[image_filename]['display_metadata'] = display_metadata
             
-            # Update metadata cache for performance
             self.update_metadata_cache(image_filename, prompt, display_metadata)
     
     def update_metadata_cache(self, image_filename: str, prompt: Optional[str] = None, 
                              display_metadata: Optional[str] = None) -> None:
-        """
-        Update the metadata cache for an image.
-        
-        Args:
-            image_filename: Name of the image file
-            prompt: AI generation prompt (if available)
-            display_metadata: Formatted metadata for display
-        """
+        """Update the metadata cache for an image."""
         try:
             if self.image_folder:
                 img_path = os.path.join(self.image_folder, image_filename)
                 if os.path.exists(img_path):
                     current_mtime = os.path.getmtime(img_path)
                     
-                    # Initialize cache entry if it doesn't exist
                     if image_filename not in self.metadata_cache:
                         self.metadata_cache[image_filename] = {}
                     
                     cache_entry = self.metadata_cache[image_filename]
                     
-                    # Update cache with new data
                     if prompt is not None:
                         cache_entry['prompt'] = prompt
                     if display_metadata is not None:
@@ -268,28 +181,17 @@ class DataManager:
                     cache_entry['last_modified'] = current_mtime
                     
         except OSError:
-            # If we can't get file info, don't cache
             pass
     
     def get_tier_distribution(self) -> Dict[int, int]:
-        """
-        Get the distribution of images across tiers.
-        
-        Returns:
-            Dictionary mapping tier numbers to image counts
-        """
+        """Get the distribution of images across tiers."""
         tier_counts = defaultdict(int)
         for stats in self.image_stats.values():
             tier_counts[stats['current_tier']] += 1
         return dict(tier_counts)
     
     def get_overall_statistics(self) -> Dict[str, Any]:
-        """
-        Calculate overall statistics for the ranking system.
-        
-        Returns:
-            Dictionary containing overall statistics
-        """
+        """Calculate overall statistics for the ranking system."""
         if not self.image_stats:
             return {
                 'total_images': 0,
@@ -308,30 +210,19 @@ class DataManager:
             'avg_votes_per_image': avg_votes_per_image,
             'tier_distribution': self.get_tier_distribution()
         }
-    
-       
         
     def save_to_file(self, filename: str) -> bool:
-        """
-        Save all ranking data to a JSON file with metadata cache.
-        
-        Args:
-            filename: Path to the output file
-            
-        Returns:
-            True if successful, False otherwise
-        """
+        """Save all ranking data to a JSON file."""
         try:
             data = {
                 'image_folder': self.image_folder,
                 'vote_count': self.vote_count,
                 'image_stats': self.image_stats,
-                'metadata_cache': self.metadata_cache,  # Include metadata cache
+                'metadata_cache': self.metadata_cache,
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.5'  # Updated version for metadata caching
+                'version': '1.5'
             }
             
-            # Add weight manager data
             data.update(self.weight_manager.export_to_data())
             
             with open(filename, 'w', encoding='utf-8') as f:
@@ -344,45 +235,31 @@ class DataManager:
             return False
     
     def load_from_file(self, filename: str) -> Tuple[bool, str]:
-        """
-        Load ranking data from a JSON file with metadata cache support.
-        
-        Args:
-            filename: Path to the input file
-            
-        Returns:
-            Tuple of (success_bool, error_message)
-        """
+        """Load ranking data from a JSON file."""
         try:
             with open(filename, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             
-            # Validate required fields
             required_fields = ['image_folder', 'vote_count', 'image_stats']
             for field in required_fields:
                 if field not in data:
                     return False, f"Missing required field: {field}"
             
-            # Load core data
             self.image_folder = data['image_folder']
             self.vote_count = data['vote_count']
             self.image_stats = data['image_stats']
             
-            # Load metadata cache if available (performance optimization)
             if 'metadata_cache' in data:
                 self.metadata_cache = data['metadata_cache']
                 print(f"Loaded metadata cache for {len(self.metadata_cache)} images")
             else:
                 self.metadata_cache = {}
             
-            # Load weight manager data
             self.weight_manager.load_from_data(data)
             
-            # Validate and fix any missing fields in image stats
             for image_filename in self.image_stats:
                 self.initialize_image_stats(image_filename)
             
-            # Invalidate cached rankings
             self._last_calculated_rankings = None
             
             return True, ""
@@ -391,4 +268,3 @@ class DataManager:
             return False, f"Invalid JSON format: {e}"
         except Exception as e:
             return False, f"Error loading data: {e}"
-    

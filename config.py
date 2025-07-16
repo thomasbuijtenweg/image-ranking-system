@@ -1,112 +1,86 @@
-"""
-Configuration constants for the Image Ranking System.
+"""Configuration constants for the Image Ranking System."""
 
-This file centralizes all the theming, UI constants, and default settings
-in one place. This makes it easy to modify the appearance or behavior
-of the entire application without hunting through multiple files.
-"""
-
-# Color constants for the dark theme interface
 class Colors:
-    """Color constants for the default dark theme interface."""
+    """Color constants for the dark theme interface."""
     
-    # Primary background colors
-    BG_PRIMARY = '#1e1e1e'      # Main window background
-    BG_SECONDARY = '#2d2d2d'    # Frame backgrounds
-    BG_TERTIARY = '#3d3d3d'     # Entry fields and image placeholders
+    BG_PRIMARY = '#1e1e1e'
+    BG_SECONDARY = '#2d2d2d'
+    BG_TERTIARY = '#3d3d3d'
     
-    # Text colors
-    TEXT_PRIMARY = '#ffffff'    # Main text
-    TEXT_SECONDARY = '#999999'  # Secondary/metadata text
-    TEXT_SUCCESS = '#66ff66'    # Success messages
-    TEXT_ERROR = '#ff6666'      # Error messages
-    TEXT_INFO = '#6666ff'       # Information text
+    TEXT_PRIMARY = '#ffffff'
+    TEXT_SECONDARY = '#999999'
+    TEXT_SUCCESS = '#66ff66'
+    TEXT_ERROR = '#ff6666'
+    TEXT_INFO = '#6666ff'
     
-    # Button colors
-    BUTTON_SUCCESS = '#4CAF50'  # Save, Apply, Vote buttons
-    BUTTON_INFO = '#2196F3'     # Load, View buttons
-    BUTTON_WARNING = '#FF9800'  # Stats button (changed from Rankings)
-    BUTTON_SECONDARY = '#9C27B0' # Stats button
-    BUTTON_NEUTRAL = '#607D8B'  # Settings button
-    BUTTON_DANGER = '#FF5722'   # Delete, Reset buttons
+    BUTTON_SUCCESS = '#4CAF50'
+    BUTTON_INFO = '#2196F3'
+    BUTTON_WARNING = '#FF9800'
+    BUTTON_SECONDARY = '#9C27B0'
+    BUTTON_NEUTRAL = '#607D8B'
+    BUTTON_DANGER = '#FF5722'
     
-    # Interactive element colors
-    BUTTON_BG = '#333333'       # Default button background
-    BUTTON_HOVER = '#4a4a4a'    # Button hover state
-    BUTTON_ACTIVE = '#555555'   # Button active state
+    BUTTON_BG = '#333333'
+    BUTTON_HOVER = '#4a4a4a'
+    BUTTON_ACTIVE = '#555555'
     
-    # Border and separator colors
     BORDER = '#333333'
     SEPARATOR = '#4a4a4a'
 
 
-# Application default settings
 class Defaults:
     """Default configuration values for the application."""
-    # Window dimensions
+    
     WINDOW_WIDTH = 1200
     WINDOW_HEIGHT = 800
     
-    # Image display settings
     MIN_IMAGE_WIDTH = 200
     MIN_IMAGE_HEIGHT = 200
     MAX_PROMPT_DISPLAY_LENGTH = 150
     
-    # Ranking algorithm weights (these sum to 1.0)
-    # These are the base weights that will be used for both left and right by default
     BASE_SELECTION_WEIGHTS = {
-        'recency': 0.25,        # How recently an image was voted on
-        'low_votes': 0.25,      # Prioritize images with fewer votes
-        'instability': 0.25,    # Prioritize images with unstable tier positions
-        'tier_size': 0.25       # Prioritize images in crowded tiers
+        'recency': 0.25,
+        'low_votes': 0.25,
+        'instability': 0.25,
+        'tier_size': 0.25
     }
     
-    # Separate weights for left and right image selection
     LEFT_SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
     RIGHT_SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
-    
-    # Legacy weight name for backward compatibility
     SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
     
-    # Priority preferences for left and right image selection
-    # These control whether high or low values are prioritized for stability and votes
     LEFT_PRIORITY_PREFERENCES = {
-        'prioritize_high_stability': False,  # False = prioritize instability (low stability)
-        'prioritize_high_votes': False,      # False = prioritize low vote counts
-        'prioritize_new_images': False       # False = use normal weight-based selection
+        'prioritize_high_stability': False,
+        'prioritize_high_votes': False,
+        'prioritize_new_images': False
     }
     
     RIGHT_PRIORITY_PREFERENCES = {
-        'prioritize_high_stability': False,  # False = prioritize instability (low stability) 
-        'prioritize_high_votes': False,      # False = prioritize low vote counts
-        'prioritize_new_images': False       # False = use normal weight-based selection
+        'prioritize_high_stability': False,
+        'prioritize_high_votes': False,
+        'prioritize_new_images': False
     }
     
-    # UI behavior settings
-    VOTE_DELAY_MS = 500         # Delay before showing next pair after vote
-    RESIZE_DEBOUNCE_MS = 300    # Delay before redrawing images after resize
-    PRELOAD_DELAY_MS = 100      # Delay before preloading next pair
+    VOTE_DELAY_MS = 500
+    RESIZE_DEBOUNCE_MS = 300
+    PRELOAD_DELAY_MS = 100
     
-    # File handling
     SUPPORTED_IMAGE_EXTENSIONS = (
         '.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp'
     )
     
-    # Metadata extraction settings
     PROMPT_KEYWORDS = [
         'parameters', 'prompt', 'description', 'comment', 
         'positive', 'negative', 'sd-metadata', 'dream',
         'generation_data', 'invokeai_metadata'
     ]
     
-    # AI generation detection keywords
     AI_KEYWORDS = [
         'prompt', 'negative', 'steps', 'cfg', 'sampler', 
         'model', 'seed', 'denoising', 'clip skip'
     ]
 
 
-# Keyboard shortcuts
 class KeyBindings:
     """Keyboard shortcut definitions."""
     VOTE_LEFT = ['<Left>', '<a>']

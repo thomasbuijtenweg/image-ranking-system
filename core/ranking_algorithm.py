@@ -1,19 +1,4 @@
-"""
-Ranking algorithm module for the Image Ranking System.
-
-This module implements the intelligent pair selection algorithm that determines
-which images should be compared next. The algorithm considers multiple factors:
-- Recency (how recently an image was voted on)
-- Vote count (prioritizing images with fewer or more votes based on preference)
-- Tier stability (prioritizing images with unstable or stable positions based on preference)
-- Tier size (prioritizing images in tiers that deviate from expected normal distribution)
-- New image prioritization (optional, based on user preference)
-
-The tier size calculation now considers that tiers should follow a normal distribution
-centered at tier 0, with tier 0 being the largest and sizes decreasing as we move away.
-
-Now supports separate weight sets and priority preferences for left and right image selection.
-"""
+"""Ranking algorithm for intelligent pair selection."""
 
 import random
 import statistics
@@ -25,50 +10,21 @@ from core.data_manager import DataManager
 
 
 class RankingAlgorithm:
-    """
-    Implements the intelligent pair selection algorithm for image ranking.
-    
-    This class contains the core logic for determining which pairs of images
-    should be compared next, based on multiple weighted factors that promote
-    efficient and fair ranking convergence. Now supports separate weights
-    and priority preferences for left and right image selection.
-    """
+    """Implements intelligent pair selection for image ranking."""
     
     def __init__(self, data_manager: DataManager):
-        """
-        Initialize the ranking algorithm.
-        
-        Args:
-            data_manager: DataManager instance containing all ranking data
-        """
         self.data_manager = data_manager
         self._cached_rankings = None
         self._last_calculation_vote_count = -1
     
     def select_next_pair(self, available_images: List[str], 
                         exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Select the next pair of images to compare using separate weights for left and right selection.
-        
-        This is the main entry point for pair selection. It implements a
-        sophisticated algorithm that considers multiple factors to choose
-        the most informative pair for comparison, with separate priority
-        calculations for left and right image selection.
-        
-        Args:
-            available_images: List of image filenames to choose from
-            exclude_pair: Optional pair to exclude from selection
-            
-        Returns:
-            Tuple of (left_image, right_image) or (None, None) if no pair can be selected
-        """
+        """Select next pair using separate weights for left and right selection."""
         if len(available_images) < 2:
             return None, None
         
-        # Convert exclude_pair to set for easier comparison
         exclude_set = set(exclude_pair) if exclude_pair else set()
         
-        # Group images by voting status
         never_voted_images = []
         voted_images = []
         
@@ -79,72 +35,47 @@ class RankingAlgorithm:
             else:
                 voted_images.append(img)
         
-        # Check if new image prioritization is enabled for either side
         left_prefs = self.data_manager.get_left_priority_preferences()
         right_prefs = self.data_manager.get_right_priority_preferences()
         
         prioritize_new_left = left_prefs.get('prioritize_new_images', False)
         prioritize_new_right = right_prefs.get('prioritize_new_images', False)
         
-        # Only use introduction logic if new image prioritization is enabled
         if never_voted_images and (prioritize_new_left or prioritize_new_right):
             return self._select_introduction_pair(never_voted_images, voted_images, exclude_set, 
                                                  prioritize_new_left, prioritize_new_right)
         
-        # Use normal tier-based selection for all images (including never-voted ones)
         return self._select_tier_based_pair_with_weights(available_images, exclude_set)
     
     def _select_introduction_pair(self, never_voted_images: List[str], 
                                 voted_images: List[str], exclude_set: Set[str],
                                 prioritize_new_left: bool, prioritize_new_right: bool) -> Tuple[str, str]:
-        """
-        Select a pair to introduce a never-voted image based on user preferences.
-        
-        Args:
-            never_voted_images: List of images that have never been voted on
-            voted_images: List of images that have been voted on
-            exclude_set: Set of image names to exclude from pairing
-            prioritize_new_left: Whether to prioritize new images for left selection
-            prioritize_new_right: Whether to prioritize new images for right selection
-            
-        Returns:
-            Tuple of (left_image, right_image)
-        """
-        # Pick a random never-voted image
+        """Select a pair to introduce a never-voted image."""
         new_image = random.choice(never_voted_images)
         
-        # Determine which side gets the new image
         if prioritize_new_left and prioritize_new_right:
-            # Both sides prioritize new images, randomly choose which side gets it
             left_gets_new = random.choice([True, False])
         elif prioritize_new_left:
-            # Only left side prioritizes new images
             left_gets_new = True
         elif prioritize_new_right:
-            # Only right side prioritizes new images
             left_gets_new = False
         else:
-            # This shouldn't happen given the calling logic, but default to left
             left_gets_new = True
         
         if voted_images:
-            # Try to find a good comparison image from voted images
             tier_0_images = [img for img in voted_images 
                            if self.data_manager.get_image_stats(img).get('current_tier', 0) == 0]
             
             comparison_image = None
             if tier_0_images:
-                # Filter out images that would recreate the excluded pair
                 valid_images = [img for img in tier_0_images 
                               if not (exclude_set and {new_image, img} == exclude_set)]
                 if valid_images:
                     comparison_image = random.choice(valid_images)
                 elif len(tier_0_images) > 1:
-                    # If no valid images but multiple tier 0 images, just pick one
                     comparison_image = random.choice(tier_0_images)
             
             if not comparison_image:
-                # If no tier 0 images, find the closest tier to 0
                 voted_by_tier = defaultdict(list)
                 for img in voted_images:
                     tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
@@ -153,41 +84,25 @@ class RankingAlgorithm:
                 closest_tier = min(voted_by_tier.keys(), key=lambda x: abs(x))
                 comparison_image = random.choice(voted_by_tier[closest_tier])
             
-            # Return based on which side should get the new image
             if left_gets_new:
                 return new_image, comparison_image
             else:
                 return comparison_image, new_image
         else:
-            # All images are unvoted, just pick two randomly
             return random.sample(never_voted_images, 2)
     
     def _select_tier_based_pair_with_weights(self, available_images: List[str], 
                                            exclude_set: Set[str]) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Select a pair using tier-based algorithm with separate left and right priority scores.
-        
-        Args:
-            available_images: List of all available images (including never-voted ones)
-            exclude_set: Set of image names to exclude from pairing
-            
-        Returns:
-            Tuple of (left_image, right_image) or (None, None) if no pair available
-        """
-        # All images are always candidates for selection
-        # The prioritize_new_images setting only affects whether they get special priority treatment
-        # not whether they're included in the selection pool
+        """Select a pair using tier-based algorithm with separate left and right weights."""
         left_candidates = available_images[:]
         right_candidates = available_images[:]
         
         if len(left_candidates) == 0 or len(right_candidates) == 0:
             return None, None
         
-        # Calculate priority scores for each side's candidates
         left_priorities = self._calculate_priority_scores(left_candidates, 'left')
         right_priorities = self._calculate_priority_scores(right_candidates, 'right')
         
-        # Group images by tier for better selection strategy
         left_images_by_tier = defaultdict(list)
         right_images_by_tier = defaultdict(list)
         
@@ -201,20 +116,20 @@ class RankingAlgorithm:
                 tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
                 right_images_by_tier[tier].append(img)
         
-        # Strategy 1: Try to select from same tier using separate weights (80% of the time)
+        # Try same tier first (80% of the time)
         if random.random() < 0.8:
             pair = self._select_from_same_tier_with_weights(left_images_by_tier, right_images_by_tier, 
                                                            left_priorities, right_priorities, exclude_set)
             if pair[0] and pair[1]:
                 return pair
         
-        # Strategy 2: Try adjacent tiers using separate weights
+        # Try adjacent tiers
         pair = self._select_from_adjacent_tiers_with_weights(left_images_by_tier, right_images_by_tier, 
                                                            left_priorities, right_priorities, exclude_set)
         if pair[0] and pair[1]:
             return pair
         
-        # Strategy 3: Fallback - pick highest priority from each weight set regardless of tier
+        # Fallback - pick highest priority from each weight set
         return self._select_highest_priorities_with_weights(left_priorities, right_priorities, exclude_set)
     
     def _select_from_same_tier_with_weights(self, left_images_by_tier: Dict[int, List[str]], 
@@ -223,13 +138,11 @@ class RankingAlgorithm:
                                           right_priorities: Dict[str, float],
                                           exclude_set: Set[str]) -> Tuple[Optional[str], Optional[str]]:
         """Select images from the same tier using separate left/right weights."""
-        # Find tiers that have images available for both sides
         common_tiers = set(left_images_by_tier.keys()) & set(right_images_by_tier.keys())
         
         if not common_tiers:
             return None, None
         
-        # Sort tiers by size (prioritize crowded tiers)
         sorted_tiers = sorted(common_tiers, key=lambda t: len(left_images_by_tier[t]) + len(right_images_by_tier[t]), reverse=True)
         
         for tier in sorted_tiers:
@@ -237,13 +150,11 @@ class RankingAlgorithm:
             right_tier_images = right_images_by_tier[tier]
             
             if len(left_tier_images) >= 1 and len(right_tier_images) >= 1:
-                # Sort by each weight set
                 left_sorted = sorted(left_tier_images, key=lambda x: left_priorities[x], reverse=True)
                 right_sorted = sorted(right_tier_images, key=lambda x: right_priorities[x], reverse=True)
                 
-                # Try combinations of top images from each sorted list
-                for left_img in left_sorted[:3]:  # Try top 3 from left weights
-                    for right_img in right_sorted[:3]:  # Try top 3 from right weights
+                for left_img in left_sorted[:3]:
+                    for right_img in right_sorted[:3]:
                         if (left_img != right_img and 
                             not (exclude_set and {left_img, right_img} == exclude_set)):
                             return left_img, right_img
@@ -260,13 +171,12 @@ class RankingAlgorithm:
         
         for i in range(len(all_tiers) - 1):
             tier1, tier2 = all_tiers[i], all_tiers[i + 1]
-            if abs(tier2 - tier1) <= 1:  # Adjacent tiers
+            if abs(tier2 - tier1) <= 1:
                 left_tier1 = left_images_by_tier.get(tier1, [])
                 left_tier2 = left_images_by_tier.get(tier2, [])
                 right_tier1 = right_images_by_tier.get(tier1, [])
                 right_tier2 = right_images_by_tier.get(tier2, [])
                 
-                # Try different combinations
                 combinations = [
                     (left_tier1, right_tier2),
                     (left_tier2, right_tier1),
@@ -276,7 +186,6 @@ class RankingAlgorithm:
                 
                 for left_images, right_images in combinations:
                     if left_images and right_images:
-                        # Pick highest priority from each tier using appropriate weights
                         left_img = max(left_images, key=lambda x: left_priorities.get(x, 0))
                         right_img = max(right_images, key=lambda x: right_priorities.get(x, 0))
                         
@@ -289,22 +198,20 @@ class RankingAlgorithm:
     def _select_highest_priorities_with_weights(self, left_priorities: Dict[str, float], 
                                               right_priorities: Dict[str, float],
                                               exclude_set: Set[str]) -> Tuple[Optional[str], Optional[str]]:
-        """Select the highest priority images from each weight set regardless of tier."""
+        """Select highest priority images from each weight set."""
         if not left_priorities or not right_priorities:
             return None, None
         
-        # Get top candidates from each weight set
         left_sorted = sorted(left_priorities.keys(), key=lambda x: left_priorities[x], reverse=True)
         right_sorted = sorted(right_priorities.keys(), key=lambda x: right_priorities[x], reverse=True)
         
-        # Try combinations of top images
-        for left_img in left_sorted[:5]:  # Try top 5 from left weights
-            for right_img in right_sorted[:5]:  # Try top 5 from right weights
+        for left_img in left_sorted[:5]:
+            for right_img in right_sorted[:5]:
                 if (left_img != right_img and 
                     not (exclude_set and {left_img, right_img} == exclude_set)):
                     return left_img, right_img
         
-        # Ultimate fallback: random selection
+        # Ultimate fallback
         all_images = list(set(left_priorities.keys()) | set(right_priorities.keys()))
         if len(all_images) >= 2:
             max_attempts = 10
@@ -316,52 +223,24 @@ class RankingAlgorithm:
         return None, None
     
     def _calculate_expected_tier_proportion(self, tier: int, total_images: int) -> float:
-        """
-        Calculate the expected proportion of images that should be in a given tier
-        based on a normal distribution centered at tier 0.
-        
-        Args:
-            tier: The tier number (can be positive, negative, or zero)
-            total_images: Total number of images in the system
-            
-        Returns:
-            Expected proportion of images (0.0 to 1.0) that should be in this tier
-        """
-        # Use normal distribution probability density function
-        # Higher density at tier 0, decreasing as we move away
+        """Calculate expected proportion of images in a tier based on normal distribution."""
         std_dev = self.data_manager.tier_distribution_std
         
-        # Calculate the probability density for this tier
-        # Using a simplified approach: e^(-(tier^2)/(2*std_dev^2))
         density = math.exp(-(tier ** 2) / (2 * std_dev ** 2))
         
-        # We need to normalize this across all existing tiers
-        # Get all existing tiers to calculate total density
         all_tiers = set()
         for stats in self.data_manager.image_stats.values():
             all_tiers.add(stats.get('current_tier', 0))
         
-        # Calculate total density across all existing tiers
         total_density = sum(math.exp(-(t ** 2) / (2 * std_dev ** 2)) for t in all_tiers)
         
-        # Return normalized proportion
         return density / total_density if total_density > 0 else 0.0
     
     def _calculate_priority_scores(self, images: List[str], weight_set: str = 'left') -> Dict[str, float]:
-        """
-        Calculate priority scores for each image based on multiple factors and preferences.
-        
-        Args:
-            images: List of image filenames to calculate scores for
-            weight_set: Which weight set to use ('left' or 'right')
-            
-        Returns:
-            Dictionary mapping image names to priority scores
-        """
+        """Calculate priority scores for each image based on multiple factors."""
         if not images:
             return {}
         
-        # Get appropriate weights and preferences based on weight_set
         if weight_set == 'left':
             weights = self.data_manager.get_left_weights()
             preferences = self.data_manager.get_left_priority_preferences()
@@ -369,17 +248,14 @@ class RankingAlgorithm:
             weights = self.data_manager.get_right_weights()
             preferences = self.data_manager.get_right_priority_preferences()
         else:
-            # Fallback to legacy weights for backward compatibility
             weights = self.data_manager.get_legacy_weights()
-            # Use default preferences if not available
             preferences = {'prioritize_high_stability': False, 'prioritize_high_votes': False}
         
-        # Calculate maximum values for normalization
         max_votes = max(self.data_manager.get_image_stats(img).get('votes', 0) for img in images)
         max_stability = max(self._calculate_tier_stability(img) for img in images)
         vote_count = self.data_manager.vote_count
         
-        # Calculate tier sizes and expected sizes based on normal distribution
+        # Calculate tier sizes based on normal distribution
         tier_sizes = defaultdict(int)
         for img in images:
             tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
@@ -387,64 +263,45 @@ class RankingAlgorithm:
         
         total_images = len(images)
         
-        # Calculate tier size scores based on deviation from expected normal distribution
         tier_size_scores = {}
         for tier, actual_size in tier_sizes.items():
             expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
             expected_size = expected_proportion * total_images
             
-            # Score is higher when tier is more over-populated than expected
-            # This means tiers with more images than they should have get higher priority
             if expected_size > 0:
                 overpopulation_ratio = actual_size / expected_size
-                # Cap the ratio to prevent extreme scores
                 tier_size_scores[tier] = min(overpopulation_ratio, 3.0) / 3.0
             else:
                 tier_size_scores[tier] = 0.0
         
-        # Calculate priority scores
         image_priorities = {}
         for img in images:
             stats = self.data_manager.get_image_stats(img)
             votes = stats.get('votes', 0)
             
-            # Handle never-voted images
             if votes == 0:
-                # Never-voted images get a base score
-                image_priorities[img] = 0.5  # Neutral priority
+                image_priorities[img] = 0.5
                 continue
             
-            # Calculate individual component scores (normalized to 0-1 range)
-            # Recency score: higher = needs voting more (hasn't been voted recently)
+            # Calculate component scores
             last_voted = stats.get('last_voted', -1)
             recency_score = ((vote_count - last_voted) / (vote_count + 1) 
                            if last_voted >= 0 else 1.0)
             
-            # Vote count score: depends on preference
             if preferences.get('prioritize_high_votes', False):
-                # Higher score for more votes
                 vote_score = votes / (max_votes + 1)
             else:
-                # Higher score for fewer votes (default behavior)
                 vote_score = 1 - (votes / (max_votes + 1))
             
-            # Stability score: depends on preference
             stability = self._calculate_tier_stability(img)
             if preferences.get('prioritize_high_stability', False):
-                # Higher score for more stable images (lower standard deviation)
                 stability_score = 1 - (stability / (max_stability + 0.1))
             else:
-                # Higher score for less stable images (higher standard deviation) - default behavior
                 stability_score = stability / (max_stability + 0.1)
             
-            # Tier size score: higher = tier is more over-populated than expected
             current_tier = stats.get('current_tier', 0)
             tier_size_score = tier_size_scores.get(current_tier, 0.0)
             
-            # Combined priority score (weighted average)
-            # Note: We use the legacy weight names for backward compatibility
-            # 'low_votes' weight now applies to either low or high votes based on preference
-            # 'instability' weight now applies to either instability or stability based on preference
             priority = (weights['recency'] * recency_score + 
                        weights['low_votes'] * vote_score + 
                        weights['instability'] * stability_score +
@@ -455,43 +312,22 @@ class RankingAlgorithm:
         return image_priorities
     
     def _calculate_tier_stability(self, image_name: str) -> float:
-        """
-        Calculate the tier stability for a single image.
-        
-        Stability is measured as the standard deviation of the image's
-        tier history. Lower values indicate more stable positioning.
-        
-        Args:
-            image_name: Name of the image file
-            
-        Returns:
-            Standard deviation of tier history, or 0.0 if insufficient data
-        """
+        """Calculate the tier stability for a single image."""
         stats = self.data_manager.get_image_stats(image_name)
         tier_history = stats.get('tier_history', [0])
         
         if len(tier_history) <= 1:
-            return 0.0  # Can't calculate std dev with 1 or fewer data points
+            return 0.0
         
         return statistics.stdev(tier_history)
     
     def calculate_all_rankings(self) -> Dict[str, List[Tuple[str, Dict[str, Any]]]]:
-        """
-        Calculate rankings for all metrics.
-        
-        This method computes comprehensive rankings across different metrics
-        and caches the results for performance.
-        
-        Returns:
-            Dictionary containing ranked lists for each metric
-        """
-        # Check if we need to recalculate
+        """Calculate rankings for all metrics."""
         current_vote_count = self.data_manager.vote_count
         if (self._cached_rankings is not None and 
             self._last_calculation_vote_count == current_vote_count):
             return self._cached_rankings
         
-        # Calculate metrics for each image
         image_metrics = {}
         for img, stats in self.data_manager.image_stats.items():
             individual_stability = self._calculate_tier_stability(img)
@@ -508,7 +344,6 @@ class RankingAlgorithm:
             }
             image_metrics[img] = metrics
         
-        # Create sorted rankings for each metric
         rankings = {
             'total_votes': sorted(image_metrics.items(), 
                                 key=lambda x: x[1]['total_votes'], reverse=True),
@@ -517,28 +352,18 @@ class RankingAlgorithm:
             'current_tier': sorted(image_metrics.items(), 
                                  key=lambda x: x[1]['current_tier'], reverse=True),
             'tier_stability': sorted(image_metrics.items(), 
-                                   key=lambda x: x[1]['tier_stability']),  # Lower is more stable
+                                   key=lambda x: x[1]['tier_stability']),
             'recency': sorted(image_metrics.items(), 
-                            key=lambda x: x[1]['recency'], reverse=True)  # Higher means less recent
+                            key=lambda x: x[1]['recency'], reverse=True)
         }
         
-        # Cache the results
         self._cached_rankings = rankings
         self._last_calculation_vote_count = current_vote_count
         
         return rankings
     
     def get_selection_explanation(self, image1: str, image2: str) -> str:
-        """
-        Generate a human-readable explanation of why this pair was selected.
-        
-        Args:
-            image1: First image in the pair (left side)
-            image2: Second image in the pair (right side)
-            
-        Returns:
-            Explanatory text about the pair selection
-        """
+        """Generate explanation of why this pair was selected."""
         stats1 = self.data_manager.get_image_stats(image1)
         stats2 = self.data_manager.get_image_stats(image2)
         
@@ -547,7 +372,6 @@ class RankingAlgorithm:
         tier1 = stats1.get('current_tier', 0)
         tier2 = stats2.get('current_tier', 0)
         
-        # Check if either image is new and if new image prioritization is enabled
         left_prefs = self.data_manager.get_left_priority_preferences()
         right_prefs = self.data_manager.get_right_priority_preferences()
         prioritize_new_left = left_prefs.get('prioritize_new_images', False)
@@ -555,7 +379,6 @@ class RankingAlgorithm:
         
         if votes1 == 0 or votes2 == 0:
             if votes1 == 0 and votes2 == 0:
-                # Both images are new - check if this was due to prioritization or normal selection
                 if prioritize_new_left or prioritize_new_right:
                     return "Both images are new - using prioritized new image selection"
                 else:
@@ -571,11 +394,9 @@ class RankingAlgorithm:
                 else:
                     return f"Right image is new: {image1} (Tier {tier1}) vs {image2} (new) - using normal selection"
         
-        # Both images have been voted on - explain selection with separate weights
         tier_diff = abs(tier1 - tier2)
         
         if tier_diff == 0:
-            # Same tier comparison
             tier_size = sum(1 for img in self.data_manager.image_stats.keys() 
                           if self.data_manager.get_image_stats(img).get('current_tier', 0) == tier1)
             
@@ -595,16 +416,14 @@ class RankingAlgorithm:
             if right_prefs.get('prioritize_high_votes'):
                 explanation += " (prioritizing high vote counts)"
             
-            if tier_size > expected_size * 1.2:  # 20% threshold for "over-populated"
+            if tier_size > expected_size * 1.2:
                 explanation += f" - Both from over-populated Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f})"
             else:
                 explanation += f" - Both from Tier {tier1} ({tier_size} images in tier)"
                 
             return explanation
         else:
-            # Different tier comparison
             return f"Left image selected from Tier {tier1} using left weights, right image selected from Tier {tier2} using right weights (tier difference: {tier_diff})"
-    
       
     def invalidate_cache(self):
         """Invalidate the cached rankings to force recalculation."""

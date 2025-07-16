@@ -1,15 +1,4 @@
-"""
-UI package for the Image Ranking System.
-
-This package contains all user interface components:
-- main_window: The primary voting interface
-- stats_window: Detailed statistics and analytics
-- settings_window: Configuration and preferences
-- mixins: Reusable UI components and functionality
-
-By organizing UI components in a separate package, we maintain
-clear separation between presentation logic and business logic.
-"""
+"""UI components for the Image Ranking System."""
 
 from .main_window import MainWindow
 from .stats_window import StatsWindow
