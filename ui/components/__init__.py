@@ -11,6 +11,10 @@ from .metadata_processor import MetadataProcessor
 from .progress_tracker import ProgressTracker
 from .folder_manager import FolderManager
 from .ui_builder import UIBuilder
+from .chart_generator import ChartGenerator
+from .data_exporter import DataExporter
+from .prompt_analyzer_ui import PromptAnalyzerUI
+from .stats_table import StatsTable
 
 __all__ = [
     'ImageDisplayController',
@@ -18,5 +22,9 @@ __all__ = [
     'MetadataProcessor',
     'ProgressTracker',
     'FolderManager',
-    'UIBuilder'
+    'UIBuilder',
+    'ChartGenerator',
+    'DataExporter',
+    'PromptAnalyzerUI',
+    'StatsTable'
 ]

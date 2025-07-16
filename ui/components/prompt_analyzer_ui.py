@@ -7,7 +7,7 @@ table, search functionality, and hover interactions.
 
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, List
+from typing import Callable, List, Optional
 
 from config import Colors
 
@@ -35,6 +35,7 @@ class PromptAnalyzerUI:
         self.word_tree = None
         self.search_var = None
         self.search_entry = None
+        self.content_frame = None
         
         # Sorting state
         self.word_sort_column = None
@@ -56,19 +57,23 @@ class PromptAnalyzerUI:
             The created tab frame
         """
         # Create main content frame
-        content_frame = tk.Frame(parent_frame, bg=Colors.BG_SECONDARY)
-        content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        self.content_frame = tk.Frame(parent_frame, bg=Colors.BG_SECONDARY)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
         # Create control frame
-        control_frame = tk.Frame(content_frame, bg=Colors.BG_SECONDARY)
+        control_frame = tk.Frame(self.content_frame, bg=Colors.BG_SECONDARY)
         control_frame.pack(fill=tk.X, pady=(0, 10))
         
         # Analysis summary
-        summary = self.prompt_analyzer.get_analysis_summary()
-        summary_text = (f"Prompt Analysis Summary: {summary['total_words']} unique words | "
-                       f"{summary['total_images_with_prompts']} images with prompts | "
-                       f"{summary['rare_words_count']} rare words | "
-                       f"{summary['avg_words_per_image']:.1f} avg words/image")
+        try:
+            summary = self.prompt_analyzer.get_analysis_summary()
+            summary_text = (f"Prompt Analysis Summary: {summary['total_words']} unique words | "
+                           f"{summary['total_images_with_prompts']} images with prompts | "
+                           f"{summary['rare_words_count']} rare words | "
+                           f"{summary['avg_words_per_image']:.1f} avg words/image")
+        except Exception as e:
+            print(f"Error getting analysis summary: {e}")
+            summary_text = "Error loading analysis summary"
         
         summary_label = tk.Label(control_frame, text=summary_text, 
                                 font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, 
@@ -108,12 +113,12 @@ class PromptAnalyzerUI:
         search_button.pack(side=tk.LEFT)
         
         # Create word analysis table
-        self.create_word_analysis_table(content_frame)
+        self.create_word_analysis_table(self.content_frame)
         
         # Initial population
         self.refresh_analysis()
         
-        return content_frame
+        return self.content_frame
     
     def create_word_analysis_table(self, parent_frame):
         """
@@ -167,42 +172,46 @@ class PromptAnalyzerUI:
         """Refresh the prompt analysis display."""
         if not self.word_tree:
             return
-            
-        # Clear existing items
-        for item in self.word_tree.get_children():
-            self.word_tree.delete(item)
         
-        # Get search term
-        search_term = self.search_var.get().strip().lower() if self.search_var else ""
-        
-        # Get word analysis
-        if search_term:
-            # Use search functionality
-            word_data = self.prompt_analyzer.search_words_by_pattern(search_term)
-        else:
-            # Get all words sorted by average tier (descending) as default
-            word_data = self.prompt_analyzer.get_sorted_word_analysis('average_tier', ascending=False)
-        
-        # Populate tree
-        for word, data in word_data:
-            tiers = data['tiers']
-            tier_range = f"{min(tiers)} to {max(tiers)}" if tiers else "N/A"
+        try:
+            # Clear existing items
+            for item in self.word_tree.get_children():
+                self.word_tree.delete(item)
             
-            # Get example images for this word
-            example_images = self.get_example_images_for_word(word)
-            example_text = ", ".join(example_images[:3])
-            if len(example_images) > 3:
-                example_text += f" (+{len(example_images)-3} more)"
+            # Get search term
+            search_term = self.search_var.get().strip().lower() if self.search_var else ""
             
-            # Insert item with word as tag for hover detection
-            self.word_tree.insert('', tk.END, values=(
-                word,
-                data['frequency'],
-                f"{data['average_tier']:.2f}",
-                f"{data['std_deviation']:.2f}",
-                tier_range,
-                example_text
-            ), tags=(word,))
+            # Get word analysis
+            if search_term:
+                # Use search functionality
+                word_data = self.prompt_analyzer.search_words_by_pattern(search_term)
+            else:
+                # Get all words sorted by average tier (descending) as default
+                word_data = self.prompt_analyzer.get_sorted_word_analysis('average_tier', ascending=False)
+            
+            # Populate tree
+            for word, data in word_data:
+                tiers = data['tiers']
+                tier_range = f"{min(tiers)} to {max(tiers)}" if tiers else "N/A"
+                
+                # Get example images for this word
+                example_images = self.get_example_images_for_word(word)
+                example_text = ", ".join(example_images[:3])
+                if len(example_images) > 3:
+                    example_text += f" (+{len(example_images)-3} more)"
+                
+                # Insert item with word as tag for hover detection
+                self.word_tree.insert('', tk.END, values=(
+                    word,
+                    data['frequency'],
+                    f"{data['average_tier']:.2f}",
+                    f"{data['std_deviation']:.2f}",
+                    tier_range,
+                    example_text
+                ), tags=(word,))
+        
+        except Exception as e:
+            print(f"Error refreshing prompt analysis: {e}")
     
     def sort_by_column(self, column):
         """
@@ -213,67 +222,71 @@ class PromptAnalyzerUI:
         """
         if not self.word_tree:
             return
-            
-        # Toggle sort direction if clicking the same column
-        if self.word_sort_column == column:
-            self.word_sort_reverse = not self.word_sort_reverse
-        else:
-            self.word_sort_column = column
-            self.word_sort_reverse = False
         
-        # Get all items with their values
-        items = []
-        for item in self.word_tree.get_children():
-            values = self.word_tree.item(item, 'values')
-            items.append((item, values))
-        
-        # Define sort key functions for each column
-        def get_sort_key(item_data):
-            values = item_data[1]  # Get the values tuple
-            
-            if column == 'Word':
-                return values[0].lower()  # Sort by word (case-insensitive)
-            elif column == 'Frequency':
-                return int(values[1])
-            elif column == 'Avg Tier':
-                return float(values[2])
-            elif column == 'Std Dev':
-                return float(values[3])
-            elif column == 'Tier Range':
-                # Sort by the first number in the range
-                range_str = values[4]
-                if range_str == "N/A":
-                    return float('-inf')
-                try:
-                    return int(range_str.split()[0])
-                except:
-                    return 0
-            elif column == 'Example Images':
-                return values[5].lower()
+        try:
+            # Toggle sort direction if clicking the same column
+            if self.word_sort_column == column:
+                self.word_sort_reverse = not self.word_sort_reverse
             else:
-                return values[0]  # Default to word
+                self.word_sort_column = column
+                self.word_sort_reverse = False
+            
+            # Get all items with their values
+            items = []
+            for item in self.word_tree.get_children():
+                values = self.word_tree.item(item, 'values')
+                items.append((item, values))
+            
+            # Define sort key functions for each column
+            def get_sort_key(item_data):
+                values = item_data[1]  # Get the values tuple
+                
+                if column == 'Word':
+                    return values[0].lower()  # Sort by word (case-insensitive)
+                elif column == 'Frequency':
+                    return int(values[1])
+                elif column == 'Avg Tier':
+                    return float(values[2])
+                elif column == 'Std Dev':
+                    return float(values[3])
+                elif column == 'Tier Range':
+                    # Sort by the first number in the range
+                    range_str = values[4]
+                    if range_str == "N/A":
+                        return float('-inf')
+                    try:
+                        return int(range_str.split()[0])
+                    except:
+                        return 0
+                elif column == 'Example Images':
+                    return values[5].lower()
+                else:
+                    return values[0]  # Default to word
+            
+            # Sort items
+            items.sort(key=get_sort_key, reverse=self.word_sort_reverse)
+            
+            # Update the tree order
+            for index, (item, values) in enumerate(items):
+                self.word_tree.move(item, '', index)
+            
+            # Update column header to show sort direction
+            columns = ('Word', 'Frequency', 'Avg Tier', 'Std Dev', 'Tier Range', 'Example Images')
+            for col in columns:
+                if col == column:
+                    direction = " ↓" if self.word_sort_reverse else " ↑"
+                    current_text = self.word_tree.heading(col, 'text')
+                    # Remove existing direction indicators
+                    clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                    self.word_tree.heading(col, text=clean_text + direction)
+                else:
+                    # Remove direction indicators from other columns
+                    current_text = self.word_tree.heading(col, 'text')
+                    clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
+                    self.word_tree.heading(col, text=clean_text)
         
-        # Sort items
-        items.sort(key=get_sort_key, reverse=self.word_sort_reverse)
-        
-        # Update the tree order
-        for index, (item, values) in enumerate(items):
-            self.word_tree.move(item, '', index)
-        
-        # Update column header to show sort direction
-        columns = ('Word', 'Frequency', 'Avg Tier', 'Std Dev', 'Tier Range', 'Example Images')
-        for col in columns:
-            if col == column:
-                direction = " ↓" if self.word_sort_reverse else " ↑"
-                current_text = self.word_tree.heading(col, 'text')
-                # Remove existing direction indicators
-                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
-                self.word_tree.heading(col, text=clean_text + direction)
-            else:
-                # Remove direction indicators from other columns
-                current_text = self.word_tree.heading(col, 'text')
-                clean_text = current_text.replace(" ↑", "").replace(" ↓", "")
-                self.word_tree.heading(col, text=clean_text)
+        except Exception as e:
+            print(f"Error sorting word analysis: {e}")
     
     def get_example_images_for_word(self, word: str) -> List[str]:
         """
@@ -288,15 +301,18 @@ class PromptAnalyzerUI:
         example_images = []
         word_lower = word.lower()
         
-        for image_name, stats in self.data_manager.image_stats.items():
-            prompt = stats.get('prompt', '')
-            if prompt:
-                main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
-                words = self.prompt_analyzer.extract_words(main_prompt)
-                if word_lower in words:
-                    example_images.append(image_name)
-                    if len(example_images) >= 5:  # Limit for performance
-                        break
+        try:
+            for image_name, stats in self.data_manager.image_stats.items():
+                prompt = stats.get('prompt', '')
+                if prompt:
+                    main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
+                    words = self.prompt_analyzer.extract_words(main_prompt)
+                    if word_lower in words:
+                        example_images.append(image_name)
+                        if len(example_images) >= 5:  # Limit for performance
+                            break
+        except Exception as e:
+            print(f"Error getting example images for word '{word}': {e}")
         
         return example_images
     
@@ -309,17 +325,20 @@ class PromptAnalyzerUI:
         """
         if not self.word_tree:
             return
-            
-        item = self.word_tree.identify_row(event.y)
-        if item:
-            # Get the word from the item's tags
-            tags = self.word_tree.item(item, 'tags')
-            if tags and self.hover_callback:
-                word = tags[0]
-                # Find an example image for this word and display it
-                example_images = self.get_example_images_for_word(word)
-                if example_images:
-                    self.hover_callback(example_images[0])
+        
+        try:
+            item = self.word_tree.identify_row(event.y)
+            if item:
+                # Get the word from the item's tags
+                tags = self.word_tree.item(item, 'tags')
+                if tags and self.hover_callback:
+                    word = tags[0]
+                    # Find an example image for this word and display it
+                    example_images = self.get_example_images_for_word(word)
+                    if example_images:
+                        self.hover_callback(example_images[0])
+        except Exception as e:
+            print(f"Error in tree hover: {e}")
     
     def on_tree_leave(self, event):
         """
@@ -329,12 +348,18 @@ class PromptAnalyzerUI:
             event: Tkinter event object
         """
         if self.leave_callback:
-            self.leave_callback()
+            try:
+                self.leave_callback()
+            except Exception as e:
+                print(f"Error in tree leave: {e}")
     
     def trigger_export(self):
         """Trigger the export functionality."""
         if self.export_callback:
-            self.export_callback()
+            try:
+                self.export_callback()
+            except Exception as e:
+                print(f"Error in export: {e}")
     
     def set_hover_callback(self, callback: Callable[[str], None]):
         """
@@ -371,7 +396,7 @@ class PromptAnalyzerUI:
             Dictionary with analysis summary
         """
         if not self.word_tree:
-            return {'total_words': 0}
+            return {'total_words': 0, 'search_term': '', 'sort_info': {}}
         
         total_words = len(self.word_tree.get_children())
         
@@ -390,12 +415,21 @@ class PromptAnalyzerUI:
             'sort_info': sort_info
         }
     
+    def clear_search(self):
+        """Clear the search field and refresh."""
+        if self.search_var:
+            self.search_var.set("")
+            self.refresh_analysis()
+    
     def cleanup(self):
         """Clean up UI resources."""
         if self.word_tree:
             # Clear all items
-            for item in self.word_tree.get_children():
-                self.word_tree.delete(item)
+            try:
+                for item in self.word_tree.get_children():
+                    self.word_tree.delete(item)
+            except:
+                pass
             
             # Clear callbacks
             self.hover_callback = None
@@ -405,3 +439,8 @@ class PromptAnalyzerUI:
         # Clear search
         if self.search_var:
             self.search_var.set("")
+        
+        # Clear references
+        self.word_tree = None
+        self.search_entry = None
+        self.content_frame = None

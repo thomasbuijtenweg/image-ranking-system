@@ -6,6 +6,7 @@ including word analysis, image statistics, and rankings.
 """
 
 import csv
+import os
 from tkinter import filedialog, messagebox
 from typing import Dict, List, Any, Optional
 
@@ -41,6 +42,11 @@ class DataExporter:
         Returns:
             True if export successful, False otherwise
         """
+        # Check if there are any prompts to analyze
+        if not self._has_prompt_data():
+            messagebox.showinfo("No Data", "No prompt data available for analysis.")
+            return False
+        
         filename = filedialog.asksaveasfilename(
             parent=parent_window,
             defaultextension=".csv",
@@ -53,6 +59,10 @@ class DataExporter:
         
         try:
             word_analysis = self.prompt_analyzer.analyze_word_performance()
+            
+            if not word_analysis:
+                messagebox.showinfo("No Data", "No word analysis data available.")
+                return False
             
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
@@ -101,6 +111,10 @@ class DataExporter:
         Returns:
             True if export successful, False otherwise
         """
+        if not self.data_manager.image_stats:
+            messagebox.showinfo("No Data", "No image statistics available to export.")
+            return False
+        
         filename = filedialog.asksaveasfilename(
             parent=parent_window,
             defaultextension=".csv",
@@ -128,7 +142,12 @@ class DataExporter:
                     wins = stats.get('wins', 0)
                     losses = stats.get('losses', 0)
                     win_rate = (wins / votes) if votes > 0 else 0
-                    stability = self.ranking_algorithm._calculate_tier_stability(img_name)
+                    
+                    try:
+                        stability = self.ranking_algorithm._calculate_tier_stability(img_name)
+                    except:
+                        stability = 0.0
+                    
                     last_voted = stats.get('last_voted', -1)
                     
                     # Format last voted
@@ -144,8 +163,11 @@ class DataExporter:
                     prompt_preview = ""
                     
                     if prompt:
-                        main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
-                        prompt_preview = main_prompt[:200] + "..." if len(main_prompt) > 200 else main_prompt
+                        try:
+                            main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
+                            prompt_preview = main_prompt[:200] + "..." if len(main_prompt) > 200 else main_prompt
+                        except:
+                            prompt_preview = "Error extracting prompt"
                     
                     all_images.append([
                         img_name,
@@ -184,6 +206,12 @@ class DataExporter:
         Returns:
             True if export successful, False otherwise
         """
+        tier_distribution = self.data_manager.get_tier_distribution()
+        
+        if not tier_distribution:
+            messagebox.showinfo("No Data", "No tier distribution data available to export.")
+            return False
+        
         filename = filedialog.asksaveasfilename(
             parent=parent_window,
             defaultextension=".csv",
@@ -195,8 +223,6 @@ class DataExporter:
             return False
         
         try:
-            tier_distribution = self.data_manager.get_tier_distribution()
-            
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 writer = csv.writer(csvfile)
                 
@@ -234,6 +260,10 @@ class DataExporter:
         Returns:
             True if export successful, False otherwise
         """
+        if not self.data_manager.image_stats:
+            messagebox.showinfo("No Data", "No ranking data available to export.")
+            return False
+        
         filename = filedialog.asksaveasfilename(
             parent=parent_window,
             defaultextension=".csv",
@@ -303,17 +333,35 @@ class DataExporter:
         example_images = []
         word_lower = word.lower()
         
-        for image_name, stats in self.data_manager.image_stats.items():
-            prompt = stats.get('prompt', '')
-            if prompt:
-                main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
-                words = self.prompt_analyzer.extract_words(main_prompt)
-                if word_lower in words:
-                    example_images.append(image_name)
-                    if len(example_images) >= 10:  # Limit for performance
-                        break
+        try:
+            for image_name, stats in self.data_manager.image_stats.items():
+                prompt = stats.get('prompt', '')
+                if prompt:
+                    try:
+                        main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
+                        words = self.prompt_analyzer.extract_words(main_prompt)
+                        if word_lower in words:
+                            example_images.append(image_name)
+                            if len(example_images) >= 10:  # Limit for performance
+                                break
+                    except:
+                        continue
+        except Exception as e:
+            print(f"Error getting example images for word '{word}': {e}")
         
         return example_images
+    
+    def _has_prompt_data(self) -> bool:
+        """
+        Check if there is any prompt data available.
+        
+        Returns:
+            True if prompt data exists, False otherwise
+        """
+        for stats in self.data_manager.image_stats.values():
+            if stats.get('prompt'):
+                return True
+        return False
     
     def get_export_options(self) -> Dict[str, str]:
         """
@@ -322,12 +370,17 @@ class DataExporter:
         Returns:
             Dictionary mapping export type to description
         """
-        return {
-            'word_analysis': 'Export word analysis data (words, frequencies, tiers)',
+        options = {
             'image_statistics': 'Export individual image statistics',
             'tier_distribution': 'Export tier distribution summary',
             'ranking_summary': 'Export comprehensive ranking summary'
         }
+        
+        # Only include word analysis if prompt data is available
+        if self._has_prompt_data():
+            options['word_analysis'] = 'Export word analysis data (words, frequencies, tiers)'
+        
+        return options
     
     def export_by_type(self, export_type: str, parent_window=None) -> bool:
         """
@@ -340,14 +393,44 @@ class DataExporter:
         Returns:
             True if export successful, False otherwise
         """
+        try:
+            if export_type == 'word_analysis':
+                return self.export_word_analysis(parent_window)
+            elif export_type == 'image_statistics':
+                return self.export_image_statistics(parent_window)
+            elif export_type == 'tier_distribution':
+                return self.export_tier_distribution(parent_window)
+            elif export_type == 'ranking_summary':
+                return self.export_ranking_summary(parent_window)
+            else:
+                messagebox.showerror("Export Error", f"Unknown export type: {export_type}")
+                return False
+        except Exception as e:
+            messagebox.showerror("Export Error", f"Failed to export {export_type}: {e}")
+            return False
+    
+    def get_available_exports(self) -> List[str]:
+        """
+        Get list of available export types.
+        
+        Returns:
+            List of export type keys
+        """
+        return list(self.get_export_options().keys())
+    
+    def validate_export_data(self, export_type: str) -> bool:
+        """
+        Validate that data exists for the specified export type.
+        
+        Args:
+            export_type: Type of export to validate
+            
+        Returns:
+            True if data exists, False otherwise
+        """
         if export_type == 'word_analysis':
-            return self.export_word_analysis(parent_window)
-        elif export_type == 'image_statistics':
-            return self.export_image_statistics(parent_window)
-        elif export_type == 'tier_distribution':
-            return self.export_tier_distribution(parent_window)
-        elif export_type == 'ranking_summary':
-            return self.export_ranking_summary(parent_window)
+            return self._has_prompt_data()
+        elif export_type in ['image_statistics', 'tier_distribution', 'ranking_summary']:
+            return bool(self.data_manager.image_stats)
         else:
-            messagebox.showerror("Export Error", f"Unknown export type: {export_type}")
             return False
