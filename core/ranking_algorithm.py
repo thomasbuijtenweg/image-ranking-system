@@ -236,7 +236,7 @@ class RankingAlgorithm:
         
         return density / total_density if total_density > 0 else 0.0
     
-    def _calculate_priority_scores(self, images: List[str], weight_set: str = 'left') -> Dict[str, float]:
+    def _calculate_priority_scores(self, images: List[str], weight_set: str) -> Dict[str, float]:
         """Calculate priority scores for each image based on multiple factors."""
         if not images:
             return {}
@@ -248,8 +248,7 @@ class RankingAlgorithm:
             weights = self.data_manager.get_right_weights()
             preferences = self.data_manager.get_right_priority_preferences()
         else:
-            weights = self.data_manager.get_legacy_weights()
-            preferences = {'prioritize_high_stability': False, 'prioritize_high_votes': False}
+            raise ValueError(f"Invalid weight_set: {weight_set}. Must be 'left' or 'right'.")
         
         max_votes = max(self.data_manager.get_image_stats(img).get('votes', 0) for img in images)
         max_stability = max(self._calculate_tier_stability(img) for img in images)

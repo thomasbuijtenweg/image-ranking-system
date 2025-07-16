@@ -39,12 +39,6 @@ class DataManager:
     def set_right_weights(self, weights: Dict[str, float]) -> None:
         self.weight_manager.set_right_weights(weights)
     
-    def get_legacy_weights(self) -> Dict[str, float]:
-        return self.weight_manager.get_legacy_weights()
-    
-    def set_legacy_weights(self, weights: Dict[str, float]) -> None:
-        self.weight_manager.set_legacy_weights(weights)
-    
     def get_left_priority_preferences(self) -> Dict[str, bool]:
         return self.weight_manager.get_left_priority_preferences()
     
@@ -220,7 +214,7 @@ class DataManager:
                 'image_stats': self.image_stats,
                 'metadata_cache': self.metadata_cache,
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.5'
+                'version': '1.6'
             }
             
             data.update(self.weight_manager.export_to_data())

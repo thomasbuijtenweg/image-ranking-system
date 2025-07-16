@@ -14,7 +14,6 @@ class WeightManager:
         """Reset all weights and preferences to default values."""
         self.left_weights = Defaults.LEFT_SELECTION_WEIGHTS.copy()
         self.right_weights = Defaults.RIGHT_SELECTION_WEIGHTS.copy()
-        self.weights = Defaults.SELECTION_WEIGHTS.copy()
         self.left_priority_preferences = Defaults.LEFT_PRIORITY_PREFERENCES.copy()
         self.right_priority_preferences = Defaults.RIGHT_PRIORITY_PREFERENCES.copy()
         self.tier_distribution_std = 1.5
@@ -28,19 +27,9 @@ class WeightManager:
     def set_left_weights(self, weights: Dict[str, float]) -> None:
         if self.validate_weights(weights):
             self.left_weights = weights.copy()
-            self.weights = weights.copy()
     
     def set_right_weights(self, weights: Dict[str, float]) -> None:
         if self.validate_weights(weights):
-            self.right_weights = weights.copy()
-    
-    def get_legacy_weights(self) -> Dict[str, float]:
-        return self.weights.copy()
-    
-    def set_legacy_weights(self, weights: Dict[str, float]) -> None:
-        if self.validate_weights(weights):
-            self.weights = weights.copy()
-            self.left_weights = weights.copy()
             self.right_weights = weights.copy()
     
     def get_left_priority_preferences(self) -> Dict[str, bool]:
@@ -94,25 +83,25 @@ class WeightManager:
     
     def load_from_data(self, data: Dict) -> None:
         """Load weights and preferences from saved data."""
-        if 'left_weights' in data and 'right_weights' in data:
-            if self.validate_weights(data['left_weights']):
-                self.left_weights = data['left_weights']
-            if self.validate_weights(data['right_weights']):
-                self.right_weights = data['right_weights']
-            if 'weights' in data and self.validate_weights(data['weights']):
-                self.weights = data['weights']
-            else:
-                self.weights = self.left_weights.copy()
-        elif 'weights' in data:
+        # Load left and right weights
+        if 'left_weights' in data and self.validate_weights(data['left_weights']):
+            self.left_weights = data['left_weights']
+        
+        if 'right_weights' in data and self.validate_weights(data['right_weights']):
+            self.right_weights = data['right_weights']
+        
+        # Backwards compatibility: if only old 'weights' exists, use for both sides
+        if 'weights' in data and not ('left_weights' in data and 'right_weights' in data):
             if self.validate_weights(data['weights']):
-                self.weights = data['weights']
                 self.left_weights = data['weights'].copy()
                 self.right_weights = data['weights'].copy()
         
+        # Load priority preferences
         if 'left_priority_preferences' in data and 'right_priority_preferences' in data:
             left_prefs = data['left_priority_preferences'].copy()
             right_prefs = data['right_priority_preferences'].copy()
             
+            # Ensure new preference exists
             if 'prioritize_new_images' not in left_prefs:
                 left_prefs['prioritize_new_images'] = False
             if 'prioritize_new_images' not in right_prefs:
@@ -123,6 +112,7 @@ class WeightManager:
             if self.validate_preferences(right_prefs):
                 self.right_priority_preferences = right_prefs
         
+        # Load tier distribution standard deviation
         if 'tier_distribution_std' in data:
             if isinstance(data['tier_distribution_std'], (int, float)) and data['tier_distribution_std'] > 0:
                 self.tier_distribution_std = data['tier_distribution_std']
@@ -132,7 +122,6 @@ class WeightManager:
         return {
             'left_weights': self.left_weights,
             'right_weights': self.right_weights,
-            'weights': self.weights,
             'left_priority_preferences': self.left_priority_preferences,
             'right_priority_preferences': self.right_priority_preferences,
             'tier_distribution_std': self.tier_distribution_std
