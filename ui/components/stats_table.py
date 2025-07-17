@@ -59,8 +59,8 @@ class StatsTable:
         self.table_frame = tk.Frame(parent_frame, bg=Colors.BG_SECONDARY)
         self.table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Define columns
-        columns = ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Last Voted', 'Prompt Preview')
+        # Define columns - added Confidence column
+        columns = ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Confidence', 'Last Voted', 'Prompt Preview')
         
         # Create treeview with scrollbar
         self.stats_tree = ttk.Treeview(self.table_frame, columns=columns, show='tree headings', height=20)
@@ -76,20 +76,22 @@ class StatsTable:
         self.stats_tree.heading('Losses', text='Losses', anchor=tk.CENTER)
         self.stats_tree.heading('Win Rate', text='Win Rate %', anchor=tk.CENTER)
         self.stats_tree.heading('Stability', text='Stability', anchor=tk.CENTER)
+        self.stats_tree.heading('Confidence', text='Confidence', anchor=tk.CENTER)
         self.stats_tree.heading('Last Voted', text='Last Voted', anchor=tk.CENTER)
         self.stats_tree.heading('Prompt Preview', text='Prompt Preview', anchor=tk.W)
         
         # Set column widths
         self.stats_tree.column('#0', width=0, stretch=False)
-        self.stats_tree.column('Image', width=180)
-        self.stats_tree.column('Tier', width=80)
-        self.stats_tree.column('Votes', width=80)
-        self.stats_tree.column('Wins', width=60)
-        self.stats_tree.column('Losses', width=60)
-        self.stats_tree.column('Win Rate', width=80)
-        self.stats_tree.column('Stability', width=80)
-        self.stats_tree.column('Last Voted', width=90)
-        self.stats_tree.column('Prompt Preview', width=300)
+        self.stats_tree.column('Image', width=160)
+        self.stats_tree.column('Tier', width=70)
+        self.stats_tree.column('Votes', width=60)
+        self.stats_tree.column('Wins', width=50)
+        self.stats_tree.column('Losses', width=50)
+        self.stats_tree.column('Win Rate', width=70)
+        self.stats_tree.column('Stability', width=70)
+        self.stats_tree.column('Confidence', width=80)
+        self.stats_tree.column('Last Voted', width=80)
+        self.stats_tree.column('Prompt Preview', width=280)
         
         # Bind click events to column headers for sorting
         for col in columns:
@@ -127,6 +129,7 @@ class StatsTable:
                 losses = stats.get('losses', 0)
                 win_rate = (wins / votes * 100) if votes > 0 else 0
                 stability = self.ranking_algorithm._calculate_tier_stability(img_name)
+                confidence = self.ranking_algorithm._calculate_image_confidence(img_name)
                 last_voted = stats.get('last_voted', -1)
                 
                 # Format last voted
@@ -152,6 +155,7 @@ class StatsTable:
                     'losses': losses,
                     'win_rate': win_rate,
                     'stability': stability,
+                    'confidence': confidence,
                     'last_voted': last_voted,
                     'last_voted_str': last_voted_str,
                     'prompt_preview': prompt_preview
@@ -170,6 +174,7 @@ class StatsTable:
                     img_data['losses'],
                     f"{img_data['win_rate']:.1f}%",
                     f"{img_data['stability']:.2f}",
+                    f"{img_data['confidence']:.2f}",
                     img_data['last_voted_str'],
                     img_data['prompt_preview']
                 ), tags=(img_data['name'],))  # Use filename as tag for hover detection
@@ -219,16 +224,18 @@ class StatsTable:
                     return float(values[5].rstrip('%'))  # Remove % and convert to float
                 elif column == 'Stability':
                     return float(values[6])
+                elif column == 'Confidence':
+                    return float(values[7])
                 elif column == 'Last Voted':
                     # Special handling for "Never" and "Current"
-                    if values[7] == "Never":
+                    if values[8] == "Never":
                         return float('inf')
-                    elif values[7] == "Current":
+                    elif values[8] == "Current":
                         return 0
                     else:
-                        return int(values[7].split()[0])  # Extract number from "X ago"
+                        return int(values[8].split()[0])  # Extract number from "X ago"
                 elif column == 'Prompt Preview':
-                    return values[8].lower()
+                    return values[9].lower()
                 else:
                     return values[0]  # Default to name
             
@@ -240,7 +247,7 @@ class StatsTable:
                 self.stats_tree.move(item, '', index)
             
             # Update column header to show sort direction
-            columns = ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Last Voted', 'Prompt Preview')
+            columns = ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Confidence', 'Last Voted', 'Prompt Preview')
             for col in columns:
                 if col == column:
                     direction = " ↓" if self.current_sort_reverse else " ↑"
@@ -400,6 +407,7 @@ class StatsTable:
             if stats.get('current_tier', 0) == tier:
                 # This is a simplified version - in a full implementation,
                 # you'd want to recreate the full item data
+                confidence = self.ranking_algorithm._calculate_image_confidence(img_name)
                 self.stats_tree.insert('', tk.END, values=(
                     img_name,
                     f"{tier:+d}",
@@ -408,6 +416,7 @@ class StatsTable:
                     stats.get('losses', 0),
                     f"{(stats.get('wins', 0) / max(stats.get('votes', 1), 1) * 100):.1f}%",
                     f"{self.ranking_algorithm._calculate_tier_stability(img_name):.2f}",
+                    f"{confidence:.2f}",
                     "...",  # Simplified
                     "..."   # Simplified
                 ), tags=(img_name,))

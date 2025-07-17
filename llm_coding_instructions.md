@@ -5,6 +5,7 @@
 - **BEFORE** implementing new features, check if new considerations should be added to this document
 - **WHEN** you identify new relevant considerations, ask the user: "Should I add [specific consideration] to the coding guidelines document?"
 - **AFTER** user confirms, update this document with the new guideline
+- **NEVER** give description text instead of properly updating the Python file
 
 ## Project Structure Requirements
 

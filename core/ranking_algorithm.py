@@ -66,8 +66,8 @@ class RankingAlgorithm:
             expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
             expected_count = expected_proportion * total_images
             
-            # Consider a tier overflowing if it has more than 120% of expected count
-            if actual_count > expected_count * 1.2 and actual_count > 2:  # Need at least 2 images
+            # Consider a tier overflowing if it has more than 100% of expected count
+            if actual_count > expected_count and actual_count > 2:  # Need at least 2 images
                 overflowing_tiers.append(tier)
         
         return overflowing_tiers

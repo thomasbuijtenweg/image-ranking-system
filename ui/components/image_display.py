@@ -214,15 +214,18 @@ class ImageDisplayController:
         
         # Calculate individual stability (requires ranking algorithm)
         stability = 0.0
+        confidence = 0.0
         if hasattr(self, 'ranking_algorithm'):
             stability = self.ranking_algorithm._calculate_tier_stability(filename)
+            confidence = self.ranking_algorithm._calculate_image_confidence(filename)
         
-        # Create info text with indication of selection weights used
-        weight_indicator = "(Left weights)" if side == 'left' else "(Right weights)"
+        # Create info text with selection method indication
+        selection_indicator = "(Low confidence)" if side == 'left' else "(High confidence, low recency)"
         info_text = (f"Tier: {stats.get('current_tier', 0)} | "
                     f"Wins: {stats.get('wins', 0)} | "
                     f"Losses: {stats.get('losses', 0)} | "
-                    f"Stability: {stability:.2f} {weight_indicator}")
+                    f"Stability: {stability:.2f} | "
+                    f"Confidence: {confidence:.2f} {selection_indicator}")
         
         # Get prompt with lazy loading
         prompt = stats.get('prompt')
