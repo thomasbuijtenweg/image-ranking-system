@@ -1,4 +1,4 @@
-"""Ranking algorithm for intelligent pair selection."""
+"""Ranking algorithm for intelligent pair selection based on tier overflow and confidence."""
 
 import random
 import statistics
@@ -10,7 +10,7 @@ from core.data_manager import DataManager
 
 
 class RankingAlgorithm:
-    """Implements intelligent pair selection for image ranking."""
+    """Implements intelligent pair selection based on tier overflow and image confidence."""
     
     def __init__(self, data_manager: DataManager):
         self.data_manager = data_manager
@@ -19,145 +19,191 @@ class RankingAlgorithm:
     
     def select_next_pair(self, available_images: List[str], 
                         exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
-        """Select next pair using separate weights for left and right selection."""
+        """Select next pair using tier overflow and confidence-based selection."""
         if len(available_images) < 2:
             return None, None
         
+        # Find overflowing tiers
+        overflowing_tiers = self._find_overflowing_tiers(available_images)
+        
+        if not overflowing_tiers:
+            # If no overflowing tiers, fall back to random selection
+            return self._fallback_random_selection(available_images, exclude_pair)
+        
+        # Select the most overflowing tier
+        selected_tier = self._select_most_overflowing_tier(overflowing_tiers, available_images)
+        
+        # Get images in selected tier
+        tier_images = [img for img in available_images 
+                       if self.data_manager.get_image_stats(img).get('current_tier', 0) == selected_tier]
+        
+        if len(tier_images) < 2:
+            return self._fallback_random_selection(available_images, exclude_pair)
+        
+        # Select left image (lowest confidence)
+        left_image = self._select_lowest_confidence_image(selected_tier, tier_images)
+        
+        # Select right image (high confidence + low recency, excluding left)
+        right_image = self._select_high_confidence_low_recency_image(
+            selected_tier, tier_images, left_image, exclude_pair)
+        
+        if left_image and right_image and left_image != right_image:
+            return left_image, right_image
+        
+        return self._fallback_random_selection(available_images, exclude_pair)
+    
+    def _find_overflowing_tiers(self, available_images: List[str]) -> List[int]:
+        """Find tiers that have more images than expected based on normal distribution."""
+        tier_counts = defaultdict(int)
+        for img in available_images:
+            tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
+            tier_counts[tier] += 1
+        
+        total_images = len(available_images)
+        overflowing_tiers = []
+        
+        for tier, actual_count in tier_counts.items():
+            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
+            expected_count = expected_proportion * total_images
+            
+            # Consider a tier overflowing if it has more than 120% of expected count
+            if actual_count > expected_count * 1.2 and actual_count > 2:  # Need at least 2 images
+                overflowing_tiers.append(tier)
+        
+        return overflowing_tiers
+    
+    def _select_most_overflowing_tier(self, overflowing_tiers: List[int], available_images: List[str]) -> int:
+        """Select the most overflowing tier from the list."""
+        if not overflowing_tiers:
+            return 0
+        
+        # Calculate overflow amount for each tier
+        tier_counts = defaultdict(int)
+        for img in available_images:
+            tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
+            tier_counts[tier] += 1
+        
+        total_images = len(available_images)
+        max_overflow = 0
+        most_overflowing_tier = overflowing_tiers[0]
+        
+        for tier in overflowing_tiers:
+            actual_count = tier_counts[tier]
+            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
+            expected_count = expected_proportion * total_images
+            
+            overflow_amount = actual_count - expected_count
+            if overflow_amount > max_overflow:
+                max_overflow = overflow_amount
+                most_overflowing_tier = tier
+        
+        return most_overflowing_tier
+    
+    def _calculate_image_confidence(self, image_name: str) -> float:
+        """Calculate confidence score for an image based on tier stability and vote count."""
+        stats = self.data_manager.get_image_stats(image_name)
+        
+        # Get tier stability (standard deviation of tier history)
+        tier_stability = self._calculate_tier_stability(image_name)
+        
+        # Get vote count
+        votes = stats.get('votes', 0)
+        
+        # Calculate confidence components
+        # Stability component: lower std dev = higher confidence
+        # Invert and normalize stability (higher stability = lower confidence)
+        stability_confidence = 1.0 / (1.0 + tier_stability)
+        
+        # Vote component: more votes = higher confidence
+        # Normalize vote count with reasonable scaling
+        vote_confidence = min(1.0, votes / 20.0)  # 20 votes = full confidence
+        
+        # Combine both components (equal weight)
+        confidence = (stability_confidence + vote_confidence) / 2.0
+        
+        return confidence
+    
+    def _select_lowest_confidence_image(self, tier: int, tier_images: List[str]) -> Optional[str]:
+        """Select the image with lowest confidence from the given tier."""
+        if not tier_images:
+            return None
+        
+        # Calculate confidence for each image
+        confidence_scores = []
+        for img in tier_images:
+            confidence = self._calculate_image_confidence(img)
+            confidence_scores.append((confidence, img))
+        
+        # Sort by confidence (lowest first)
+        confidence_scores.sort(key=lambda x: x[0])
+        
+        # Return the lowest confidence image
+        return confidence_scores[0][1]
+    
+    def _select_high_confidence_low_recency_image(self, tier: int, tier_images: List[str], 
+                                                exclude_image: str, exclude_pair: Optional[Tuple[str, str]] = None) -> Optional[str]:
+        """Select image with high confidence and low recency (not checked recently) from the tier."""
+        if not tier_images:
+            return None
+        
+        # Filter out excluded images
+        available_images = [img for img in tier_images if img != exclude_image]
+        
+        if exclude_pair:
+            exclude_set = set(exclude_pair)
+            available_images = [img for img in available_images if img not in exclude_set]
+        
+        if not available_images:
+            return None
+        
+        # Calculate combined score for each image
+        scored_images = []
+        current_vote_count = self.data_manager.vote_count
+        
+        for img in available_images:
+            confidence = self._calculate_image_confidence(img)
+            
+            # Calculate time since last voted (higher = less recent = better)
+            stats = self.data_manager.get_image_stats(img)
+            last_voted = stats.get('last_voted', -1)
+            
+            if last_voted == -1:
+                time_since_voted = current_vote_count + 1  # Never voted = maximum
+            else:
+                time_since_voted = current_vote_count - last_voted
+            
+            # Normalize time_since_voted to 0-1 range
+            max_time = current_vote_count + 1
+            time_factor = time_since_voted / max_time if max_time > 0 else 0
+            
+            # Combine confidence and time factor (equal weight)
+            combined_score = (confidence + time_factor) / 2.0
+            
+            scored_images.append((combined_score, img))
+        
+        # Sort by combined score (highest first)
+        scored_images.sort(key=lambda x: x[0], reverse=True)
+        
+        # Return the best scoring image
+        return scored_images[0][1]
+    
+    def _fallback_random_selection(self, available_images: List[str], exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
+        """Fallback to random selection when tier-based selection fails."""
+        if len(available_images) < 2:
+            return None, None
+        
+        # Try random selection with exclusion
         exclude_set = set(exclude_pair) if exclude_pair else set()
         
-        # All images are treated equally - no special handling for new images
-        return self._select_tier_based_pair_with_weights(available_images, exclude_set)
-    
-    def _select_tier_based_pair_with_weights(self, available_images: List[str], 
-                                           exclude_set: Set[str]) -> Tuple[Optional[str], Optional[str]]:
-        """Select a pair using tier-based algorithm with separate left and right weights."""
-        left_candidates = available_images[:]
-        right_candidates = available_images[:]
+        max_attempts = 10
+        for _ in range(max_attempts):
+            pair = random.sample(available_images, 2)
+            if not exclude_set or set(pair) != exclude_set:
+                return pair[0], pair[1]
         
-        if len(left_candidates) == 0 or len(right_candidates) == 0:
-            return None, None
-        
-        left_priorities = self._calculate_priority_scores(left_candidates, 'left')
-        right_priorities = self._calculate_priority_scores(right_candidates, 'right')
-        
-        left_images_by_tier = defaultdict(list)
-        right_images_by_tier = defaultdict(list)
-        
-        for img in left_candidates:
-            if img in left_priorities:
-                tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
-                left_images_by_tier[tier].append(img)
-        
-        for img in right_candidates:
-            if img in right_priorities:
-                tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
-                right_images_by_tier[tier].append(img)
-        
-        # Try same tier first (80% of the time)
-        if random.random() < 0.8:
-            pair = self._select_from_same_tier_with_weights(left_images_by_tier, right_images_by_tier, 
-                                                           left_priorities, right_priorities, exclude_set)
-            if pair[0] and pair[1]:
-                return pair
-        
-        # Try adjacent tiers
-        pair = self._select_from_adjacent_tiers_with_weights(left_images_by_tier, right_images_by_tier, 
-                                                           left_priorities, right_priorities, exclude_set)
-        if pair[0] and pair[1]:
-            return pair
-        
-        # Fallback - pick highest priority from each weight set
-        return self._select_highest_priorities_with_weights(left_priorities, right_priorities, exclude_set)
-    
-    def _select_from_same_tier_with_weights(self, left_images_by_tier: Dict[int, List[str]], 
-                                          right_images_by_tier: Dict[int, List[str]],
-                                          left_priorities: Dict[str, float], 
-                                          right_priorities: Dict[str, float],
-                                          exclude_set: Set[str]) -> Tuple[Optional[str], Optional[str]]:
-        """Select images from the same tier using separate left/right weights."""
-        common_tiers = set(left_images_by_tier.keys()) & set(right_images_by_tier.keys())
-        
-        if not common_tiers:
-            return None, None
-        
-        sorted_tiers = sorted(common_tiers, key=lambda t: len(left_images_by_tier[t]) + len(right_images_by_tier[t]), reverse=True)
-        
-        for tier in sorted_tiers:
-            left_tier_images = left_images_by_tier[tier]
-            right_tier_images = right_images_by_tier[tier]
-            
-            if len(left_tier_images) >= 1 and len(right_tier_images) >= 1:
-                left_sorted = sorted(left_tier_images, key=lambda x: left_priorities[x], reverse=True)
-                right_sorted = sorted(right_tier_images, key=lambda x: right_priorities[x], reverse=True)
-                
-                for left_img in left_sorted[:3]:
-                    for right_img in right_sorted[:3]:
-                        if (left_img != right_img and 
-                            not (exclude_set and {left_img, right_img} == exclude_set)):
-                            return left_img, right_img
-        
-        return None, None
-    
-    def _select_from_adjacent_tiers_with_weights(self, left_images_by_tier: Dict[int, List[str]], 
-                                               right_images_by_tier: Dict[int, List[str]],
-                                               left_priorities: Dict[str, float], 
-                                               right_priorities: Dict[str, float],
-                                               exclude_set: Set[str]) -> Tuple[Optional[str], Optional[str]]:
-        """Select images from adjacent tiers using separate left/right weights."""
-        all_tiers = sorted(set(left_images_by_tier.keys()) | set(right_images_by_tier.keys()))
-        
-        for i in range(len(all_tiers) - 1):
-            tier1, tier2 = all_tiers[i], all_tiers[i + 1]
-            if abs(tier2 - tier1) <= 1:
-                left_tier1 = left_images_by_tier.get(tier1, [])
-                left_tier2 = left_images_by_tier.get(tier2, [])
-                right_tier1 = right_images_by_tier.get(tier1, [])
-                right_tier2 = right_images_by_tier.get(tier2, [])
-                
-                combinations = [
-                    (left_tier1, right_tier2),
-                    (left_tier2, right_tier1),
-                    (left_tier1, right_tier1),
-                    (left_tier2, right_tier2)
-                ]
-                
-                for left_images, right_images in combinations:
-                    if left_images and right_images:
-                        left_img = max(left_images, key=lambda x: left_priorities.get(x, 0))
-                        right_img = max(right_images, key=lambda x: right_priorities.get(x, 0))
-                        
-                        if (left_img != right_img and 
-                            not (exclude_set and {left_img, right_img} == exclude_set)):
-                            return left_img, right_img
-        
-        return None, None
-    
-    def _select_highest_priorities_with_weights(self, left_priorities: Dict[str, float], 
-                                              right_priorities: Dict[str, float],
-                                              exclude_set: Set[str]) -> Tuple[Optional[str], Optional[str]]:
-        """Select highest priority images from each weight set."""
-        if not left_priorities or not right_priorities:
-            return None, None
-        
-        left_sorted = sorted(left_priorities.keys(), key=lambda x: left_priorities[x], reverse=True)
-        right_sorted = sorted(right_priorities.keys(), key=lambda x: right_priorities[x], reverse=True)
-        
-        for left_img in left_sorted[:5]:
-            for right_img in right_sorted[:5]:
-                if (left_img != right_img and 
-                    not (exclude_set and {left_img, right_img} == exclude_set)):
-                    return left_img, right_img
-        
-        # Ultimate fallback
-        all_images = list(set(left_priorities.keys()) | set(right_priorities.keys()))
-        if len(all_images) >= 2:
-            max_attempts = 10
-            for _ in range(max_attempts):
-                pair = random.sample(all_images, 2)
-                if not (exclude_set and set(pair) == exclude_set):
-                    return pair[0], pair[1]
-        
-        return None, None
+        # If we can't avoid exclude_pair, just return any pair
+        pair = random.sample(available_images, 2)
+        return pair[0], pair[1]
     
     def _calculate_expected_tier_proportion(self, tier: int, total_images: int) -> float:
         """Calculate expected proportion of images in a tier based on normal distribution."""
@@ -172,76 +218,6 @@ class RankingAlgorithm:
         total_density = sum(math.exp(-(t ** 2) / (2 * std_dev ** 2)) for t in all_tiers)
         
         return density / total_density if total_density > 0 else 0.0
-    
-    def _calculate_priority_scores(self, images: List[str], weight_set: str) -> Dict[str, float]:
-        """Calculate priority scores for each image based on multiple factors."""
-        if not images:
-            return {}
-        
-        if weight_set == 'left':
-            weights = self.data_manager.get_left_weights()
-            preferences = self.data_manager.get_left_priority_preferences()
-        elif weight_set == 'right':
-            weights = self.data_manager.get_right_weights()
-            preferences = self.data_manager.get_right_priority_preferences()
-        else:
-            raise ValueError(f"Invalid weight_set: {weight_set}. Must be 'left' or 'right'.")
-        
-        max_votes = max(self.data_manager.get_image_stats(img).get('votes', 0) for img in images)
-        max_stability = max(self._calculate_tier_stability(img) for img in images)
-        vote_count = self.data_manager.vote_count
-        
-        # Calculate tier sizes based on normal distribution
-        tier_sizes = defaultdict(int)
-        for img in images:
-            tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
-            tier_sizes[tier] += 1
-        
-        total_images = len(images)
-        
-        tier_size_scores = {}
-        for tier, actual_size in tier_sizes.items():
-            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
-            expected_size = expected_proportion * total_images
-            
-            if expected_size > 0:
-                overpopulation_ratio = actual_size / expected_size
-                tier_size_scores[tier] = min(overpopulation_ratio, 3.0) / 3.0
-            else:
-                tier_size_scores[tier] = 0.0
-        
-        image_priorities = {}
-        for img in images:
-            stats = self.data_manager.get_image_stats(img)
-            votes = stats.get('votes', 0)
-            
-            # Calculate component scores
-            last_voted = stats.get('last_voted', -1)
-            recency_score = ((vote_count - last_voted) / (vote_count + 1) 
-                           if last_voted >= 0 else 1.0)
-            
-            if preferences.get('prioritize_high_votes', False):
-                vote_score = votes / (max_votes + 1)
-            else:
-                vote_score = 1 - (votes / (max_votes + 1))
-            
-            stability = self._calculate_tier_stability(img)
-            if preferences.get('prioritize_high_stability', False):
-                stability_score = 1 - (stability / (max_stability + 0.1))
-            else:
-                stability_score = stability / (max_stability + 0.1)
-            
-            current_tier = stats.get('current_tier', 0)
-            tier_size_score = tier_size_scores.get(current_tier, 0.0)
-            
-            priority = (weights['recency'] * recency_score + 
-                       weights['low_votes'] * vote_score + 
-                       weights['instability'] * stability_score +
-                       weights['tier_size'] * tier_size_score)
-            
-            image_priorities[img] = priority
-        
-        return image_priorities
     
     def _calculate_tier_stability(self, image_name: str) -> float:
         """Calculate the tier stability for a single image."""
@@ -272,7 +248,8 @@ class RankingAlgorithm:
                 'current_tier': stats.get('current_tier', 0),
                 'tier_stability': individual_stability,
                 'recency': (current_vote_count - stats.get('last_voted', -1) 
-                          if stats.get('last_voted', -1) >= 0 else float('inf'))
+                          if stats.get('last_voted', -1) >= 0 else float('inf')),
+                'confidence': self._calculate_image_confidence(img)
             }
             image_metrics[img] = metrics
         
@@ -286,7 +263,9 @@ class RankingAlgorithm:
             'tier_stability': sorted(image_metrics.items(), 
                                    key=lambda x: x[1]['tier_stability']),
             'recency': sorted(image_metrics.items(), 
-                            key=lambda x: x[1]['recency'], reverse=True)
+                            key=lambda x: x[1]['recency'], reverse=True),
+            'confidence': sorted(image_metrics.items(), 
+                               key=lambda x: x[1]['confidence'], reverse=True)
         }
         
         self._cached_rankings = rankings
@@ -299,17 +278,15 @@ class RankingAlgorithm:
         stats1 = self.data_manager.get_image_stats(image1)
         stats2 = self.data_manager.get_image_stats(image2)
         
-        votes1 = stats1.get('votes', 0)
-        votes2 = stats2.get('votes', 0)
         tier1 = stats1.get('current_tier', 0)
         tier2 = stats2.get('current_tier', 0)
         
-        left_prefs = self.data_manager.get_left_priority_preferences()
-        right_prefs = self.data_manager.get_right_priority_preferences()
-        
-        tier_diff = abs(tier1 - tier2)
-        
-        if tier_diff == 0:
+        if tier1 == tier2:
+            # Calculate confidence for both images
+            confidence1 = self._calculate_image_confidence(image1)
+            confidence2 = self._calculate_image_confidence(image2)
+            
+            # Get tier size information
             tier_size = sum(1 for img in self.data_manager.image_stats.keys() 
                           if self.data_manager.get_image_stats(img).get('current_tier', 0) == tier1)
             
@@ -317,26 +294,13 @@ class RankingAlgorithm:
             expected_proportion = self._calculate_expected_tier_proportion(tier1, total_images)
             expected_size = expected_proportion * total_images
             
-            explanation = f"Left image (Tier {tier1}) selected using left weights"
-            if left_prefs.get('prioritize_high_stability'):
-                explanation += " (prioritizing stable images)"
-            if left_prefs.get('prioritize_high_votes'):
-                explanation += " (prioritizing high vote counts)"
-            
-            explanation += f", right image (Tier {tier2}) selected using right weights"
-            if right_prefs.get('prioritize_high_stability'):
-                explanation += " (prioritizing stable images)"
-            if right_prefs.get('prioritize_high_votes'):
-                explanation += " (prioritizing high vote counts)"
-            
-            if tier_size > expected_size * 1.2:
-                explanation += f" - Both from over-populated Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f})"
-            else:
-                explanation += f" - Both from Tier {tier1} ({tier_size} images in tier)"
-                
-            return explanation
+            explanation = (f"Overflowing Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f}): "
+                          f"Left image (low confidence: {confidence1:.2f}) vs "
+                          f"Right image (high confidence: {confidence2:.2f}, not recently voted)")
         else:
-            return f"Left image selected from Tier {tier1} using left weights, right image selected from Tier {tier2} using right weights (tier difference: {tier_diff})"
+            explanation = f"Fallback selection: Left image from Tier {tier1}, Right image from Tier {tier2}"
+        
+        return explanation
       
     def invalidate_cache(self):
         """Invalidate the cached rankings to force recalculation."""
