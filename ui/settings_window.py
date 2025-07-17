@@ -43,7 +43,7 @@ class SettingsWindow:
         """Create the settings window."""
         self.window = tk.Toplevel(self.parent)
         self.window.title("Algorithm Settings")
-        self.window.geometry("1000x900")
+        self.window.geometry("1000x800")
         self.window.configure(bg=Colors.BG_PRIMARY)
         
         self.window.protocol("WM_DELETE_WINDOW", self.close_window)
@@ -231,24 +231,6 @@ class SettingsWindow:
         
         controls_frame = tk.Frame(parent, bg=Colors.BG_TERTIARY)
         controls_frame.pack(padx=10, pady=10, fill=tk.BOTH, expand=True)
-        
-        # New image prioritization
-        new_image_frame = tk.Frame(controls_frame, bg=Colors.BG_TERTIARY)
-        new_image_frame.pack(fill=tk.X, pady=5)
-        
-        tk.Label(new_image_frame, text="New Image Priority:", font=('Arial', 10, 'bold'), 
-                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(anchor=tk.W)
-        
-        current_new_image_pref = current_preferences.get('prioritize_new_images', False)
-        new_image_var = tk.BooleanVar(value=current_new_image_pref)
-        preference_vars['prioritize_new_images'] = new_image_var
-        
-        new_image_checkbox = tk.Checkbutton(new_image_frame, 
-                                          text="Prioritize new (never-voted) images", 
-                                          variable=new_image_var,
-                                          fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY,
-                                          selectcolor=Colors.BG_PRIMARY, activebackground=Colors.BG_TERTIARY)
-        new_image_checkbox.pack(anchor=tk.W, padx=20)
         
         # Stability preference
         stability_frame = tk.Frame(controls_frame, bg=Colors.BG_TERTIARY)

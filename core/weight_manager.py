@@ -72,7 +72,7 @@ class WeightManager:
         if not isinstance(preferences, dict):
             return False
         
-        required_keys = ['prioritize_high_stability', 'prioritize_high_votes', 'prioritize_new_images']
+        required_keys = ['prioritize_high_stability', 'prioritize_high_votes']
         for key in required_keys:
             if key not in preferences:
                 return False
@@ -101,11 +101,11 @@ class WeightManager:
             left_prefs = data['left_priority_preferences'].copy()
             right_prefs = data['right_priority_preferences'].copy()
             
-            # Ensure new preference exists
-            if 'prioritize_new_images' not in left_prefs:
-                left_prefs['prioritize_new_images'] = False
-            if 'prioritize_new_images' not in right_prefs:
-                right_prefs['prioritize_new_images'] = False
+            # Remove deprecated 'prioritize_new_images' preference if it exists
+            if 'prioritize_new_images' in left_prefs:
+                del left_prefs['prioritize_new_images']
+            if 'prioritize_new_images' in right_prefs:
+                del right_prefs['prioritize_new_images']
             
             if self.validate_preferences(left_prefs):
                 self.left_priority_preferences = left_prefs

@@ -51,14 +51,12 @@ class Defaults:
     
     LEFT_PRIORITY_PREFERENCES = {
         'prioritize_high_stability': False,
-        'prioritize_high_votes': False,
-        'prioritize_new_images': False
+        'prioritize_high_votes': False
     }
     
     RIGHT_PRIORITY_PREFERENCES = {
         'prioritize_high_stability': False,
-        'prioritize_high_votes': False,
-        'prioritize_new_images': False
+        'prioritize_high_votes': False
     }
     
     VOTE_DELAY_MS = 500

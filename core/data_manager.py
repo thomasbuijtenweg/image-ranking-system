@@ -60,11 +60,13 @@ class DataManager:
         self.weight_manager.set_tier_distribution_std(value)
     
     def initialize_image_stats(self, image_filename: str) -> None:
-        """Initialize stats for a new image."""
+        """Initialize stats for a new image with automatic tier 0 assignment."""
         if image_filename not in self.image_stats:
+            # New images get 1 vote and are automatically placed at tier 0
+            # The single vote represents automatic placement rather than an actual comparison
             self.image_stats[image_filename] = {
-                'votes': 0,
-                'wins': 0,
+                'votes': 1,
+                'wins': 1,
                 'losses': 0,
                 'current_tier': 0,
                 'tier_history': [0],
@@ -74,9 +76,11 @@ class DataManager:
                 'display_metadata': None
             }
         else:
+            # For existing images, ensure required fields exist
+            # But don't override existing values unless the field is missing
             required_fields = {
-                'votes': 0,
-                'wins': 0,
+                'votes': 1,
+                'wins': 1,
                 'losses': 0,
                 'current_tier': 0,
                 'tier_history': [0],
