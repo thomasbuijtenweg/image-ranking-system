@@ -26,6 +26,14 @@ class DataManager:
         self.weight_manager.reset_to_defaults()
         self._last_calculated_rankings = None
         self._last_calculation_vote_count = -1
+        
+        # Initialize new algorithm settings
+        self.tier_distribution_std = 1.5
+        self.confidence_vote_scale = 20.0
+        self.confidence_balance = 0.5
+        self.overflow_threshold = 1.0
+        self.min_overflow_images = 2
+        self.min_votes_for_stability = 6
     
     def get_left_weights(self) -> Dict[str, float]:
         return self.weight_manager.get_left_weights()
@@ -53,11 +61,11 @@ class DataManager:
     
     @property
     def tier_distribution_std(self) -> float:
-        return self.weight_manager.get_tier_distribution_std()
+        return getattr(self, '_tier_distribution_std', 1.5)
     
     @tier_distribution_std.setter
     def tier_distribution_std(self, value: float) -> None:
-        self.weight_manager.set_tier_distribution_std(value)
+        self._tier_distribution_std = value
     
     def _calculate_strategic_last_voted(self, image_filename: str) -> int:
         """Calculate strategic last_voted value for a new image."""
@@ -236,6 +244,56 @@ class DataManager:
             'avg_votes_per_image': avg_votes_per_image,
             'tier_distribution': self.get_tier_distribution()
         }
+    
+    def export_algorithm_settings(self) -> Dict[str, Any]:
+        """Export current algorithm settings to a dictionary."""
+        return {
+            'algorithm_settings': {
+                'tier_distribution_std': getattr(self, '_tier_distribution_std', 1.5),
+                'confidence_vote_scale': getattr(self, 'confidence_vote_scale', 20.0),
+                'confidence_balance': getattr(self, 'confidence_balance', 0.5),
+                'overflow_threshold': getattr(self, 'overflow_threshold', 1.0),
+                'min_overflow_images': getattr(self, 'min_overflow_images', 2),
+                'min_votes_for_stability': getattr(self, 'min_votes_for_stability', 6),
+                'algorithm_version': '2.0'
+            }
+        }
+    
+    def load_algorithm_settings(self, data: Dict[str, Any]) -> None:
+        """Load algorithm settings from loaded data."""
+        # Load new algorithm settings if they exist
+        if 'algorithm_settings' in data:
+            settings = data['algorithm_settings']
+            self.tier_distribution_std = settings.get('tier_distribution_std', 1.5)
+            self.confidence_vote_scale = settings.get('confidence_vote_scale', 20.0)
+            self.confidence_balance = settings.get('confidence_balance', 0.5)
+            self.overflow_threshold = settings.get('overflow_threshold', 1.0)
+            self.min_overflow_images = settings.get('min_overflow_images', 2)
+            self.min_votes_for_stability = settings.get('min_votes_for_stability', 6)
+            
+            print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.0')}")
+        else:
+            # Set defaults if no algorithm settings found
+            self.tier_distribution_std = getattr(self, '_tier_distribution_std', 1.5)
+            self.confidence_vote_scale = getattr(self, 'confidence_vote_scale', 20.0)
+            self.confidence_balance = getattr(self, 'confidence_balance', 0.5)
+            self.overflow_threshold = getattr(self, 'overflow_threshold', 1.0)
+            self.min_overflow_images = getattr(self, 'min_overflow_images', 2)
+            self.min_votes_for_stability = getattr(self, 'min_votes_for_stability', 6)
+            
+            print("No algorithm settings found, using defaults")
+    
+    def get_algorithm_settings_summary(self) -> Dict[str, Any]:
+        """Get a summary of current algorithm settings."""
+        return {
+            'tier_distribution_std': getattr(self, '_tier_distribution_std', 1.5),
+            'confidence_vote_scale': getattr(self, 'confidence_vote_scale', 20.0),
+            'confidence_balance': getattr(self, 'confidence_balance', 0.5),
+            'overflow_threshold': getattr(self, 'overflow_threshold', 1.0),
+            'min_overflow_images': getattr(self, 'min_overflow_images', 2),
+            'min_votes_for_stability': getattr(self, 'min_votes_for_stability', 6),
+            'has_deprecated_weights': hasattr(self, 'weight_manager') and self.weight_manager is not None
+        }
         
     def save_to_file(self, filename: str) -> bool:
         """Save all ranking data to a JSON file."""
@@ -246,10 +304,14 @@ class DataManager:
                 'image_stats': self.image_stats,
                 'metadata_cache': self.metadata_cache,
                 'timestamp': datetime.now().isoformat(),
-                'version': '1.6'
+                'version': '2.0'  # Updated version for new algorithm
             }
             
+            # Export weight manager data (for backward compatibility)
             data.update(self.weight_manager.export_to_data())
+            
+            # Export new algorithm settings
+            data.update(self.export_algorithm_settings())
             
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -314,7 +376,11 @@ class DataManager:
             else:
                 self.metadata_cache = {}
             
+            # Load weight manager data (for backward compatibility)
             self.weight_manager.load_from_data(data)
+            
+            # Load new algorithm settings
+            self.load_algorithm_settings(data)
             
             # Update existing images with strategic timing
             self._update_existing_images_with_strategic_timing()

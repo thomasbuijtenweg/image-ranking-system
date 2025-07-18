@@ -1,12 +1,12 @@
 """Ranking algorithm for intelligent pair selection based on tier overflow and confidence."""
 
 import random
-import statistics
 import math
 from typing import List, Tuple, Dict, Any, Optional, Set
 from collections import defaultdict
 
 from core.data_manager import DataManager
+from core.confidence_calculator import ConfidenceCalculator
 
 
 class RankingAlgorithm:
@@ -14,6 +14,7 @@ class RankingAlgorithm:
     
     def __init__(self, data_manager: DataManager):
         self.data_manager = data_manager
+        self.confidence_calculator = ConfidenceCalculator(data_manager)
         self._cached_rankings = None
         self._last_calculation_vote_count = -1
     
@@ -62,12 +63,18 @@ class RankingAlgorithm:
         total_images = len(available_images)
         overflowing_tiers = []
         
+        # Get overflow settings
+        overflow_threshold = getattr(self.data_manager, 'overflow_threshold', 1.0)
+        min_overflow_images = getattr(self.data_manager, 'min_overflow_images', 2)
+        
         for tier, actual_count in tier_counts.items():
             expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
             expected_count = expected_proportion * total_images
             
-            # Consider a tier overflowing if it has more than 100% of expected count
-            if actual_count > expected_count and actual_count > 2:  # Need at least 2 images
+            # Consider a tier overflowing if it has more than the threshold percentage of expected count
+            # and has at least the minimum number of images
+            if (actual_count > expected_count * overflow_threshold and 
+                actual_count >= min_overflow_images):
                 overflowing_tiers.append(tier)
         
         return overflowing_tiers
@@ -87,10 +94,12 @@ class RankingAlgorithm:
         max_overflow = 0
         most_overflowing_tier = overflowing_tiers[0]
         
+        overflow_threshold = getattr(self.data_manager, 'overflow_threshold', 1.0)
+        
         for tier in overflowing_tiers:
             actual_count = tier_counts[tier]
             expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
-            expected_count = expected_proportion * total_images
+            expected_count = expected_proportion * total_images * overflow_threshold
             
             overflow_amount = actual_count - expected_count
             if overflow_amount > max_overflow:
@@ -101,27 +110,20 @@ class RankingAlgorithm:
     
     def _calculate_image_confidence(self, image_name: str) -> float:
         """Calculate confidence score for an image based on tier stability and vote count."""
+        return self.confidence_calculator.calculate_image_confidence(image_name)
+    
+    def _calculate_stability_confidence(self, image_name: str) -> float:
+        """Calculate stability confidence using simplified square root approach."""
         stats = self.data_manager.get_image_stats(image_name)
-        
-        # Get tier stability (standard deviation of tier history)
-        tier_stability = self._calculate_tier_stability(image_name)
-        
-        # Get vote count
         votes = stats.get('votes', 0)
         
-        # Calculate confidence components
-        # Stability component: lower std dev = higher confidence
-        # Invert and normalize stability (higher stability = lower confidence)
-        stability_confidence = 1.0 / (1.0 + tier_stability)
+        if votes == 0:
+            return 0.0  # No confidence for untested images
         
-        # Vote component: more votes = higher confidence
-        # Normalize vote count with reasonable scaling
-        vote_confidence = min(1.0, votes / 20.0)  # 20 votes = full confidence
+        tier_stability = self._calculate_tier_stability(image_name)
+        effective_stability = tier_stability / math.sqrt(votes)
         
-        # Combine both components (equal weight)
-        confidence = (stability_confidence + vote_confidence) / 2.0
-        
-        return confidence
+        return 1.0 / (1.0 + effective_stability)
     
     def _select_lowest_confidence_image(self, tier: int, tier_images: List[str]) -> Optional[str]:
         """Select the image with lowest confidence from the given tier."""
@@ -207,7 +209,7 @@ class RankingAlgorithm:
     
     def _calculate_expected_tier_proportion(self, tier: int, total_images: int) -> float:
         """Calculate expected proportion of images in a tier based on normal distribution."""
-        std_dev = self.data_manager.tier_distribution_std
+        std_dev = getattr(self.data_manager, 'tier_distribution_std', 1.5)
         
         density = math.exp(-(tier ** 2) / (2 * std_dev ** 2))
         
@@ -281,10 +283,13 @@ class RankingAlgorithm:
         tier1 = stats1.get('current_tier', 0)
         tier2 = stats2.get('current_tier', 0)
         
+        # Get algorithm settings for explanation
+        overflow_threshold = getattr(self.data_manager, 'overflow_threshold', 1.0)
+        
         if tier1 == tier2:
-            # Calculate confidence for both images
-            confidence1 = self._calculate_image_confidence(image1)
-            confidence2 = self._calculate_image_confidence(image2)
+            # Get detailed confidence breakdown
+            breakdown1 = self.confidence_calculator.get_confidence_breakdown(image1)
+            breakdown2 = self.confidence_calculator.get_confidence_breakdown(image2)
             
             # Get tier size information
             tier_size = sum(1 for img in self.data_manager.image_stats.keys() 
@@ -294,9 +299,10 @@ class RankingAlgorithm:
             expected_proportion = self._calculate_expected_tier_proportion(tier1, total_images)
             expected_size = expected_proportion * total_images
             
-            explanation = (f"Overflowing Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f}): "
-                          f"Left image (low confidence: {confidence1:.2f}) vs "
-                          f"Right image (high confidence: {confidence2:.2f}, not recently voted)")
+            explanation = (f"Overflowing Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f}, "
+                          f"threshold {overflow_threshold:.1f}x): "
+                          f"Left image ({breakdown1['votes']} votes, confidence: {breakdown1['confidence']:.3f}) vs "
+                          f"Right image ({breakdown2['votes']} votes, confidence: {breakdown2['confidence']:.3f}, not recently voted)")
         else:
             explanation = f"Fallback selection: Left image from Tier {tier1}, Right image from Tier {tier2}"
         
@@ -306,3 +312,13 @@ class RankingAlgorithm:
         """Invalidate the cached rankings to force recalculation."""
         self._cached_rankings = None
         self._last_calculation_vote_count = -1
+    
+    def get_algorithm_summary(self) -> Dict[str, Any]:
+        """Get a summary of current algorithm settings."""
+        return {
+            'tier_distribution_std': getattr(self.data_manager, 'tier_distribution_std', 1.5),
+            'overflow_threshold': getattr(self.data_manager, 'overflow_threshold', 1.0),
+            'min_overflow_images': getattr(self.data_manager, 'min_overflow_images', 2),
+            'algorithm_type': 'tier_overflow_confidence_sqrt_pure',
+            'version': '2.2'
+        }
