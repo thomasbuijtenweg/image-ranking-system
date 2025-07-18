@@ -76,16 +76,16 @@ class FolderManager:
         self.metadata_processor.start_background_extraction(images)
         
         if self.status_bar:
-            self.status_bar.config(text=f"Loaded {len(images)} images. All images initialized at tier 0. Metadata extraction running in background. Ready to vote!")
+            self.status_bar.config(text=f"Loaded {len(images)} images. All images initialized at tier 0 with strategic vote timing. Metadata extraction running in background. Ready to vote!")
         
         if self.on_load_complete_callback:
             self.on_load_complete_callback(images)
     
     def _initialize_image_stats(self, images: list) -> None:
-        """Initialize statistics for all images with automatic tier 0 assignment."""
+        """Initialize statistics for all images with strategic placement."""
         processed_count = 0
         for img in images:
-            # All images are automatically initialized at tier 0 with 1 vote
+            # All images are initialized at tier 0 with 0 votes and strategic last_voted timing
             self.data_manager.initialize_image_stats(img)
             processed_count += 1
             
@@ -93,7 +93,7 @@ class FolderManager:
                 self.progress_tracker.update_progress(
                     processed_count, 
                     len(images), 
-                    f"Initializing: {processed_count}/{len(images)} (all starting at tier 0)"
+                    f"Initializing: {processed_count}/{len(images)} (tier 0, strategic vote timing)"
                 )
                 
                 if self.on_progress_callback:

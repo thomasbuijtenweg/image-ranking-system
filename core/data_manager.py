@@ -59,18 +59,46 @@ class DataManager:
     def tier_distribution_std(self, value: float) -> None:
         self.weight_manager.set_tier_distribution_std(value)
     
+    def _calculate_strategic_last_voted(self, image_filename: str) -> int:
+        """Calculate strategic last_voted value for a new image."""
+        # If this is the first image or no existing images, return 0
+        if not self.image_stats or image_filename in self.image_stats:
+            return 0
+        
+        # Find the highest last_voted value among existing images
+        highest_last_voted = -1
+        for stats in self.image_stats.values():
+            last_voted = stats.get('last_voted', -1)
+            if last_voted > highest_last_voted:
+                highest_last_voted = last_voted
+        
+        # Handle edge cases
+        if highest_last_voted == -1:
+            # All existing images have never been voted on
+            return 0
+        elif highest_last_voted == 0:
+            # Highest is 0, so new images also get 0
+            return 0
+        else:
+            # Strategic placement: 1 + (highest / 2)
+            strategic_value = 1 + (highest_last_voted // 2)
+            return strategic_value
+    
     def initialize_image_stats(self, image_filename: str) -> None:
-        """Initialize stats for a new image with automatic tier 0 assignment."""
+        """Initialize stats for a new image with strategic placement."""
         if image_filename not in self.image_stats:
-            # New images get 1 vote and are automatically placed at tier 0
-            # The single vote represents automatic placement rather than an actual comparison
+            # Calculate strategic last_voted value
+            strategic_last_voted = self._calculate_strategic_last_voted(image_filename)
+            
+            # New images start with realistic stats: 0 votes, 0 wins, 0 losses
+            # but are placed at tier 0 and given strategic last_voted timing
             self.image_stats[image_filename] = {
-                'votes': 1,
-                'wins': 1,
+                'votes': 0,
+                'wins': 0,
                 'losses': 0,
                 'current_tier': 0,
                 'tier_history': [0],
-                'last_voted': -1,
+                'last_voted': strategic_last_voted,
                 'matchup_history': [],
                 'prompt': None,
                 'display_metadata': None
@@ -79,8 +107,8 @@ class DataManager:
             # For existing images, ensure required fields exist
             # But don't override existing values unless the field is missing
             required_fields = {
-                'votes': 1,
-                'wins': 1,
+                'votes': 0,
+                'wins': 0,
                 'losses': 0,
                 'current_tier': 0,
                 'tier_history': [0],
@@ -232,6 +260,39 @@ class DataManager:
             print(f"Error saving data: {e}")
             return False
     
+    def _update_existing_images_with_strategic_timing(self) -> None:
+        """Update existing images that have never been voted on to use strategic timing."""
+        if not self.image_stats:
+            return
+        
+        # Find the highest last_voted value among all images
+        highest_last_voted = -1
+        for stats in self.image_stats.values():
+            last_voted = stats.get('last_voted', -1)
+            if last_voted > highest_last_voted:
+                highest_last_voted = last_voted
+        
+        # If no images have been voted on, nothing to update
+        if highest_last_voted == -1:
+            return
+        
+        # Calculate strategic value for updating never-voted images
+        if highest_last_voted == 0:
+            strategic_value = 0
+        else:
+            strategic_value = 1 + (highest_last_voted // 2)
+        
+        # Update all images that have NEVER been voted on (last_voted == -1)
+        updated_count = 0
+        for image_filename, stats in self.image_stats.items():
+            last_voted = stats.get('last_voted', -1)
+            if last_voted == -1:  # This image has never been voted on
+                stats['last_voted'] = strategic_value
+                updated_count += 1
+        
+        if updated_count > 0:
+            print(f"Updated {updated_count} never-voted images with strategic timing value: {strategic_value}")
+    
     def load_from_file(self, filename: str) -> Tuple[bool, str]:
         """Load ranking data from a JSON file."""
         try:
@@ -254,6 +315,9 @@ class DataManager:
                 self.metadata_cache = {}
             
             self.weight_manager.load_from_data(data)
+            
+            # Update existing images with strategic timing
+            self._update_existing_images_with_strategic_timing()
             
             for image_filename in self.image_stats:
                 self.initialize_image_stats(image_filename)
