@@ -322,6 +322,36 @@ class DataManager:
             print(f"Error saving data: {e}")
             return False
     
+    def _validate_and_fix_vote_counts(self) -> None:
+        """Validate and fix vote count inconsistencies from legacy data."""
+        if not self.image_stats:
+            return
+    
+        fixed_count = 0
+        total_images = len(self.image_stats)
+    
+        for image_filename, stats in self.image_stats.items():
+            wins = stats.get('wins', 0)
+            losses = stats.get('losses', 0)
+            votes = stats.get('votes', 0)
+        
+        expected_votes = wins + losses
+        
+        if votes != expected_votes:
+            # Fix the vote count
+            stats['votes'] = expected_votes
+            fixed_count += 1
+            
+            # Log the correction for debugging
+            if fixed_count <= 5:  # Only log first 5 to avoid spam
+                print(f"Fixed vote count for {image_filename}: was {votes}, now {expected_votes} (wins: {wins}, losses: {losses})")
+    
+        if fixed_count > 0:
+            print(f"Corrected vote count inconsistencies for {fixed_count}/{total_images} images")
+        else:
+            print("No vote count inconsistencies found")
+
+
     def _update_existing_images_with_strategic_timing(self) -> None:
         """Update existing images that have never been voted on to use strategic timing."""
         if not self.image_stats:
@@ -381,7 +411,10 @@ class DataManager:
             
             # Load new algorithm settings
             self.load_algorithm_settings(data)
-            
+
+            # Validate and fix vote count inconsistencies from legacy data
+            self._validate_and_fix_vote_counts()
+
             # Update existing images with strategic timing
             self._update_existing_images_with_strategic_timing()
             

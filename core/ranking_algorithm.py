@@ -2,11 +2,13 @@
 
 import random
 import math
+import statistics
 from typing import List, Tuple, Dict, Any, Optional, Set
 from collections import defaultdict
 
 from core.data_manager import DataManager
 from core.confidence_calculator import ConfidenceCalculator
+
 
 
 class RankingAlgorithm:
