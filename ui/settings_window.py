@@ -1,22 +1,103 @@
-"""Enhanced Settings window with tier bounds configuration."""
+"""Modern settings window with sleek design and enhanced functionality."""
 
 import tkinter as tk
 from tkinter import ttk, messagebox
 from typing import Dict
 import math
 
-from config import Colors
+from config import Colors, Fonts, Styling
+from ui.components.ui_builder import ModernFrame, ModernButton, ModernLabel
 
 
-class SettingsWindow:
-    """Window for configuring system settings and algorithm parameters."""
+class ModernSlider(tk.Scale):
+    """Custom slider with modern styling."""
+    
+    def __init__(self, parent, **kwargs):
+        # Modern slider styling
+        style_config = {
+            'bg': Colors.BG_CARD,
+            'fg': Colors.TEXT_PRIMARY,
+            'troughcolor': Colors.BG_TERTIARY,
+            'activebackground': Colors.PURPLE_PRIMARY,
+            'highlightbackground': Colors.BG_CARD,
+            'highlightcolor': Colors.PURPLE_PRIMARY,
+            'borderwidth': 0,
+            'relief': 'flat',
+            'font': Fonts.SMALL,
+            'length': 400,
+            'width': 20
+        }
+        
+        final_config = {**style_config, **kwargs}
+        super().__init__(parent, **final_config)
+
+
+class ModernCheckbox(tk.Checkbutton):
+    """Custom checkbox with modern styling."""
+    
+    def __init__(self, parent, **kwargs):
+        # Modern checkbox styling
+        style_config = {
+            'bg': Colors.BG_CARD,
+            'fg': Colors.TEXT_PRIMARY,
+            'selectcolor': Colors.PURPLE_PRIMARY,
+            'activebackground': Colors.BG_CARD,
+            'activeforeground': Colors.TEXT_PRIMARY,
+            'borderwidth': 0,
+            'relief': 'flat',
+            'font': Fonts.MEDIUM,
+            'cursor': 'hand2'
+        }
+        
+        final_config = {**style_config, **kwargs}
+        super().__init__(parent, **final_config)
+
+
+class ModernSettingsCard(ModernFrame):
+    """Modern settings card with title and content area."""
+    
+    def __init__(self, parent, title, icon="⚙️", **kwargs):
+        super().__init__(parent, style='card', **kwargs)
+        
+        # Header
+        header = ModernFrame(self)
+        header.pack(fill=tk.X, padx=Styling.PADDING_LARGE, pady=Styling.PADDING_LARGE)
+        
+        # Icon and title
+        icon_label = ModernLabel(header, text=icon, font=Fonts.LARGE, fg=Colors.PURPLE_PRIMARY)
+        icon_label.pack(side=tk.LEFT)
+        
+        title_label = ModernLabel(header, text=title, font=Fonts.HEADING, fg=Colors.TEXT_PRIMARY)
+        title_label.pack(side=tk.LEFT, padx=(Styling.PADDING_MEDIUM, 0))
+        
+        # Content frame
+        self.content_frame = ModernFrame(self)
+        self.content_frame.pack(fill=tk.BOTH, expand=True, padx=Styling.PADDING_LARGE, pady=(0, Styling.PADDING_LARGE))
+    
+    def add_description(self, text):
+        """Add description text to the card."""
+        desc_label = ModernLabel(self.content_frame, 
+                                text=text, 
+                                font=Fonts.SMALL, 
+                                style='secondary',
+                                wraplength=850,
+                                justify=tk.LEFT)
+        desc_label.pack(fill=tk.X, pady=(0, Styling.PADDING_MEDIUM))
+    
+    def add_widget(self, widget):
+        """Add a widget to the card content."""
+        widget.pack(in_=self.content_frame, fill=tk.X, pady=Styling.PADDING_SMALL)
+
+
+class ModernSettingsWindow:
+    """Modern settings window with sleek design and enhanced user experience."""
     
     def __init__(self, parent: tk.Tk, data_manager):
         self.parent = parent
         self.data_manager = data_manager
         self.window = None
         
-        # Current algorithm settings
+        # Setting variables
         self.tier_std_var = None
         self.tier_std_label = None
         self.overflow_threshold_var = None
@@ -24,7 +105,7 @@ class SettingsWindow:
         self.min_overflow_images_var = None
         self.min_overflow_images_label = None
         
-        # Tier bounds settings
+        # Tier bounds variables
         self.tier_bounds_enabled_var = None
         self.tier_bounds_std_multiplier_var = None
         self.tier_bounds_std_multiplier_label = None
@@ -33,19 +114,19 @@ class SettingsWindow:
         self.tier_bounds_min_votes_var = None
         self.tier_bounds_min_votes_label = None
         self.tier_bounds_adaptive_var = None
+        self.tier_bounds_status_label = None
         
-        # Initialize new settings
-        self._initialize_new_settings()
+        # Status display
+        self.status_text_label = None
+        
+        # Initialize settings
+        self._initialize_settings()
     
-    def _initialize_new_settings(self):
-        """Initialize new settings with default values if they don't exist."""
-        # Ensure all tier bounds settings exist
+    def _initialize_settings(self):
+        """Initialize settings with default values if they don't exist."""
+        # Tier bounds settings
         if not hasattr(self.data_manager, 'tier_bounds_enabled'):
             self.data_manager.tier_bounds_enabled = True
-            print("Initialized tier_bounds_enabled to True")
-        else:
-            print(f"Found existing tier_bounds_enabled: {self.data_manager.tier_bounds_enabled}")
-            
         if not hasattr(self.data_manager, 'tier_bounds_std_multiplier'):
             self.data_manager.tier_bounds_std_multiplier = 3.0
         if not hasattr(self.data_manager, 'tier_bounds_min_confidence'):
@@ -55,7 +136,7 @@ class SettingsWindow:
         if not hasattr(self.data_manager, 'tier_bounds_adaptive'):
             self.data_manager.tier_bounds_adaptive = True
         
-        # Ensure existing settings exist
+        # Other settings
         if not hasattr(self.data_manager, 'overflow_threshold'):
             self.data_manager.overflow_threshold = 1.0
         if not hasattr(self.data_manager, 'min_overflow_images'):
@@ -64,7 +145,7 @@ class SettingsWindow:
             self.data_manager.tier_distribution_std = 1.5
     
     def show(self):
-        """Show the settings window."""
+        """Show the modern settings window."""
         if self.window is None or not self.window.winfo_exists():
             self.create_window()
         else:
@@ -72,484 +153,443 @@ class SettingsWindow:
             self.window.focus_force()
     
     def create_window(self):
-        """Create the settings window."""
+        """Create the modern settings window."""
         self.window = tk.Toplevel(self.parent)
-        self.window.title("Algorithm Settings")
-        self.window.geometry("900x900")
+        self.window.title("⚙️ Algorithm Settings")
+        self.window.geometry("1000x900")
         self.window.configure(bg=Colors.BG_PRIMARY)
+        self.window.resizable(True, True)
         
         self.window.protocol("WM_DELETE_WINDOW", self.close_window)
         
-        # Create scrollable content
-        main_frame = tk.Frame(self.window, bg=Colors.BG_PRIMARY)
-        main_frame.pack(fill=tk.BOTH, expand=True)
+        # Main container
+        main_container = ModernFrame(self.window)
+        main_container.pack(fill=tk.BOTH, expand=True, padx=Styling.PADDING_LARGE, pady=Styling.PADDING_LARGE)
         
-        canvas = tk.Canvas(main_frame, bg=Colors.BG_PRIMARY, highlightthickness=0)
-        scrollbar = ttk.Scrollbar(main_frame, orient="vertical", command=canvas.yview)
-        scrollable_frame = tk.Frame(canvas, bg=Colors.BG_PRIMARY)
+        # Create scrollable content
+        self._create_scrollable_content(main_container)
+    
+    def _create_scrollable_content(self, parent):
+        """Create scrollable content area."""
+        # Create canvas and scrollbar
+        canvas = tk.Canvas(parent, bg=Colors.BG_PRIMARY, highlightthickness=0)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        scrollable_frame = ModernFrame(canvas)
         
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
         
-        self.create_settings_content(scrollable_frame)
+        # Create content
+        self._create_settings_content(scrollable_frame)
         
-        scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        # Configure scrolling
+        def configure_scroll_region(event):
+            canvas.configure(scrollregion=canvas.bbox("all"))
+        
+        def configure_canvas_width(event):
+            canvas.itemconfig(canvas_frame, width=event.width)
+        
+        scrollable_frame.bind("<Configure>", configure_scroll_region)
+        canvas.bind("<Configure>", configure_canvas_width)
+        
+        # Pack canvas and scrollbar
         canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
         
-        self.update_all_displays()
+        # Bind mouse wheel
+        def on_mousewheel(event):
+            canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        
+        canvas.bind_all("<MouseWheel>", on_mousewheel)
     
-    def create_settings_content(self, parent: tk.Frame):
-        """Create the main settings content."""
+    def _create_settings_content(self, parent):
+        """Create the main settings content with modern design."""
         # Header
-        header_frame = tk.Frame(parent, bg=Colors.BG_PRIMARY)
-        header_frame.pack(fill=tk.X, pady=10)
-        
-        tk.Label(header_frame, text="Algorithm Settings", 
-                font=('Arial', 16, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY).pack()
-        
-        # Algorithm explanation
-        explanation_frame = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
-        explanation_frame.pack(fill=tk.X, padx=10, pady=5)
-        
-        tk.Label(explanation_frame, text="How the Algorithm Works", 
-                font=('Arial', 14, 'bold'), fg=Colors.TEXT_SUCCESS, bg=Colors.BG_SECONDARY).pack(pady=5)
-        
-        explanation_text = """The algorithm uses tier-overflow detection and confidence-based pairing with intelligent tier bounds:
-
-1. TIER BOUNDS: Prevents runaway tier inflation by limiting extreme tiers
-2. CONFIDENCE GATING: Only high-confidence images (stable + many votes) can exceed bounds
-3. ADAPTIVE SCALING: Bounds grow intelligently with collection size
-4. ELEGANT FALLBACK: Images that can't move stay in current tier
-
-This ensures a stable, bounded tier system while allowing truly exceptional images to reach extremes."""
-        
-        tk.Label(explanation_frame, text=explanation_text, 
-                font=('Arial', 10), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY, 
-                justify=tk.LEFT, wraplength=850).pack(padx=10, pady=5)
+        self._create_modern_header(parent)
         
         # Settings sections
-        self.create_tier_bounds_section(parent)
-        self.create_tier_distribution_section(parent)
-        self.create_overflow_detection_section(parent)
-        self.create_status_section(parent)
+        self._create_tier_bounds_section(parent)
+        self._create_tier_distribution_section(parent)
+        self._create_overflow_detection_section(parent)
+        self._create_status_section(parent)
         
-        # Apply button
-        tk.Button(parent, text="Apply Changes", 
-                 command=self.apply_changes,
-                 bg=Colors.BUTTON_SUCCESS, fg='white', font=('Arial', 12), relief=tk.FLAT).pack(pady=20)
+        # Action buttons
+        self._create_action_buttons(parent)
     
-    def create_tier_bounds_section(self, parent: tk.Frame):
-        """Create the tier bounds settings section."""
-        section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
-        section.pack(fill=tk.X, padx=10, pady=5)
+    def _create_modern_header(self, parent):
+        """Create modern header with algorithm explanation."""
+        header_card = ModernSettingsCard(parent, "Algorithm Configuration", "🧠")
+        header_card.pack(fill=tk.X, pady=(0, Styling.PADDING_LARGE))
         
-        tk.Label(section, text="🎯 Tier Bounds (NEW)", 
-                font=('Arial', 14, 'bold'), fg=Colors.TEXT_SUCCESS, bg=Colors.BG_SECONDARY).pack(pady=10)
+        explanation = """The ranking algorithm uses advanced tier-overflow detection with intelligent bounds management:
+
+• TIER BOUNDS: Prevent runaway tier inflation while allowing exceptional images to reach extremes
+• CONFIDENCE GATING: High-confidence images (stable + many votes) can exceed normal bounds
+• ADAPTIVE SCALING: Bounds grow intelligently with your collection size
+• ELEGANT FALLBACK: Images that can't move stay in their current tier
+
+This ensures a stable, bounded system while maintaining ranking quality."""
         
-        description_text = ("Intelligent tier bounds prevent runaway tier inflation while allowing exceptional images to reach extremes. "
-                          "Images need high confidence (stability + votes) to exceed the bounds.")
-        tk.Label(section, text=description_text, font=('Arial', 10, 'italic'), 
-                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, wraplength=850, justify=tk.LEFT).pack(pady=5)
+        header_card.add_description(explanation)
+    
+    def _create_tier_bounds_section(self, parent):
+        """Create tier bounds settings section."""
+        card = ModernSettingsCard(parent, "Tier Bounds Control", "🎯")
+        card.pack(fill=tk.X, pady=(0, Styling.PADDING_LARGE))
         
-        controls_frame = tk.Frame(section, bg=Colors.BG_SECONDARY)
-        controls_frame.pack(padx=20, pady=10)
+        card.add_description("Control how extreme tiers can become. Prevents runaway inflation while allowing truly exceptional images to reach extremes.")
         
-        # Enable/disable tier bounds
-        checkbox_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
-        checkbox_frame.pack(fill=tk.X, pady=5)
+        # Enable/disable checkbox
+        checkbox_frame = ModernFrame(card.content_frame)
+        checkbox_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
         self.tier_bounds_enabled_var = tk.BooleanVar(value=getattr(self.data_manager, 'tier_bounds_enabled', True))
         
-        # Create checkbox with proper styling to show check state
-        checkbox = tk.Checkbutton(checkbox_frame, text="Enable Tier Bounds", 
-                                 variable=self.tier_bounds_enabled_var,
-                                 font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, 
-                                 bg=Colors.BG_SECONDARY, 
-                                 activebackground=Colors.BG_SECONDARY,
-                                 selectcolor=Colors.BG_TERTIARY,  # Color when checked
-                                 activeforeground=Colors.TEXT_PRIMARY,
-                                 command=self.on_tier_bounds_enabled_change)
-        checkbox.pack(anchor=tk.W)
+        enable_checkbox = ModernCheckbox(checkbox_frame,
+                                        text="Enable Tier Bounds",
+                                        variable=self.tier_bounds_enabled_var,
+                                        command=self._on_tier_bounds_enabled_change)
+        enable_checkbox.pack(anchor=tk.W)
         
-        # Add status indicator
-        self.tier_bounds_status_label = tk.Label(checkbox_frame, 
-                                                text="Status: Enabled" if self.tier_bounds_enabled_var.get() else "Status: Disabled",
-                                                font=('Arial', 9, 'italic'), 
-                                                fg=Colors.TEXT_SUCCESS if self.tier_bounds_enabled_var.get() else Colors.TEXT_ERROR, 
-                                                bg=Colors.BG_SECONDARY)
-        self.tier_bounds_status_label.pack(anchor=tk.W, padx=20)
+        self.tier_bounds_status_label = ModernLabel(checkbox_frame,
+                                                   text="Status: Enabled" if self.tier_bounds_enabled_var.get() else "Status: Disabled",
+                                                   font=Fonts.SMALL,
+                                                   fg=Colors.SUCCESS if self.tier_bounds_enabled_var.get() else Colors.ERROR)
+        self.tier_bounds_status_label.pack(anchor=tk.W, padx=(Styling.PADDING_LARGE, 0))
         
-        # Adaptive bounds checkbox
+        # Adaptive bounds
         self.tier_bounds_adaptive_var = tk.BooleanVar(value=getattr(self.data_manager, 'tier_bounds_adaptive', True))
-        adaptive_checkbox = tk.Checkbutton(checkbox_frame, text="Adaptive Bounds (grow with collection size)", 
-                                          variable=self.tier_bounds_adaptive_var,
-                                          font=('Arial', 10), fg=Colors.TEXT_SECONDARY, 
-                                          bg=Colors.BG_SECONDARY, 
-                                          activebackground=Colors.BG_SECONDARY,
-                                          selectcolor=Colors.BG_TERTIARY,
-                                          activeforeground=Colors.TEXT_SECONDARY)
-        adaptive_checkbox.pack(anchor=tk.W, padx=20)
+        adaptive_checkbox = ModernCheckbox(checkbox_frame,
+                                          text="Adaptive Bounds (grow with collection size)",
+                                          variable=self.tier_bounds_adaptive_var)
+        adaptive_checkbox.pack(anchor=tk.W, pady=(Styling.PADDING_SMALL, 0))
         
-        # Standard deviation multiplier
-        std_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
-        std_frame.pack(fill=tk.X, pady=5)
+        # Bounds size slider
+        self._create_bounds_size_control(card.content_frame)
         
-        tk.Label(std_frame, text="Bounds Size (Standard Deviations)", 
-                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        # Confidence requirement slider
+        self._create_confidence_control(card.content_frame)
         
-        tk.Label(std_frame, text="How many standard deviations from tier 0 to allow (3.0 = 99.7% containment)", 
-                font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        # Votes requirement slider
+        self._create_votes_control(card.content_frame)
+        
+        # Action buttons
+        self._create_bounds_actions(card.content_frame)
+    
+    def _create_bounds_size_control(self, parent):
+        """Create bounds size control."""
+        control_frame = ModernFrame(parent)
+        control_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
+        
+        label = ModernLabel(control_frame, text="Bounds Size (Standard Deviations)", font=Fonts.MEDIUM)
+        label.pack(anchor=tk.W)
+        
+        desc = ModernLabel(control_frame, text="How many standard deviations to allow (3.0 = 99.7% containment)", 
+                          font=Fonts.SMALL, style='secondary')
+        desc.pack(anchor=tk.W)
         
         current_value = getattr(self.data_manager, 'tier_bounds_std_multiplier', 3.0)
-        self.tier_bounds_std_multiplier_label = tk.Label(std_frame, text=f"Current: {current_value:.1f} std devs", 
-                                                       fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        self.tier_bounds_std_multiplier_label.pack(anchor=tk.W)
+        self.tier_bounds_std_multiplier_label = ModernLabel(control_frame, 
+                                                           text=f"Current: {current_value:.1f} std devs",
+                                                           font=Fonts.SMALL, fg=Colors.PURPLE_PRIMARY)
+        self.tier_bounds_std_multiplier_label.pack(anchor=tk.W, pady=(Styling.PADDING_SMALL, 0))
         
         self.tier_bounds_std_multiplier_var = tk.DoubleVar(value=current_value)
         
-        slider = tk.Scale(std_frame, from_=1.0, to=5.0, resolution=0.1,
-                        orient=tk.HORIZONTAL, variable=self.tier_bounds_std_multiplier_var,
-                        command=lambda v: self.update_tier_bounds_std_multiplier_display(),
-                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
-                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_SUCCESS,
-                        length=400)
-        slider.pack(fill=tk.X, padx=20, pady=5)
+        slider = ModernSlider(control_frame,
+                             from_=1.0, to=5.0, resolution=0.1,
+                             orient=tk.HORIZONTAL,
+                             variable=self.tier_bounds_std_multiplier_var,
+                             command=lambda v: self._update_bounds_size_display())
+        slider.pack(fill=tk.X, pady=Styling.PADDING_SMALL)
+    
+    def _create_confidence_control(self, parent):
+        """Create confidence requirement control."""
+        control_frame = ModernFrame(parent)
+        control_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
-        # Minimum confidence for bounds
-        confidence_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
-        confidence_frame.pack(fill=tk.X, pady=5)
+        label = ModernLabel(control_frame, text="Minimum Confidence to Exceed Bounds", font=Fonts.MEDIUM)
+        label.pack(anchor=tk.W)
         
-        tk.Label(confidence_frame, text="Minimum Confidence to Exceed Bounds", 
-                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
-        
-        tk.Label(confidence_frame, text="Images need this confidence level to go beyond bounds (0.8 = 80%)", 
-                font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        desc = ModernLabel(control_frame, text="Images need this confidence level to go beyond bounds", 
+                          font=Fonts.SMALL, style='secondary')
+        desc.pack(anchor=tk.W)
         
         current_value = getattr(self.data_manager, 'tier_bounds_min_confidence', 0.8)
-        self.tier_bounds_min_confidence_label = tk.Label(confidence_frame, text=f"Current: {current_value:.1%}", 
-                                                       fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        self.tier_bounds_min_confidence_label.pack(anchor=tk.W)
+        self.tier_bounds_min_confidence_label = ModernLabel(control_frame, 
+                                                           text=f"Current: {current_value:.1%}",
+                                                           font=Fonts.SMALL, fg=Colors.PURPLE_PRIMARY)
+        self.tier_bounds_min_confidence_label.pack(anchor=tk.W, pady=(Styling.PADDING_SMALL, 0))
         
         self.tier_bounds_min_confidence_var = tk.DoubleVar(value=current_value)
         
-        slider = tk.Scale(confidence_frame, from_=0.5, to=0.95, resolution=0.05,
-                        orient=tk.HORIZONTAL, variable=self.tier_bounds_min_confidence_var,
-                        command=lambda v: self.update_tier_bounds_min_confidence_display(),
-                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
-                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_SUCCESS,
-                        length=400)
-        slider.pack(fill=tk.X, padx=20, pady=5)
+        slider = ModernSlider(control_frame,
+                             from_=0.5, to=0.95, resolution=0.05,
+                             orient=tk.HORIZONTAL,
+                             variable=self.tier_bounds_min_confidence_var,
+                             command=lambda v: self._update_confidence_display())
+        slider.pack(fill=tk.X, pady=Styling.PADDING_SMALL)
+    
+    def _create_votes_control(self, parent):
+        """Create votes requirement control."""
+        control_frame = ModernFrame(parent)
+        control_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
-        # Minimum votes for bounds
-        votes_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
-        votes_frame.pack(fill=tk.X, pady=5)
+        label = ModernLabel(control_frame, text="Minimum Votes to Exceed Bounds", font=Fonts.MEDIUM)
+        label.pack(anchor=tk.W)
         
-        tk.Label(votes_frame, text="Minimum Votes to Exceed Bounds", 
-                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
-        
-        tk.Label(votes_frame, text="Images need this many votes to go beyond bounds", 
-                font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        desc = ModernLabel(control_frame, text="Images need this many votes to go beyond bounds", 
+                          font=Fonts.SMALL, style='secondary')
+        desc.pack(anchor=tk.W)
         
         current_value = getattr(self.data_manager, 'tier_bounds_min_votes', 10)
-        self.tier_bounds_min_votes_label = tk.Label(votes_frame, text=f"Current: {current_value} votes", 
-                                                  fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        self.tier_bounds_min_votes_label.pack(anchor=tk.W)
+        self.tier_bounds_min_votes_label = ModernLabel(control_frame, 
+                                                      text=f"Current: {current_value} votes",
+                                                      font=Fonts.SMALL, fg=Colors.PURPLE_PRIMARY)
+        self.tier_bounds_min_votes_label.pack(anchor=tk.W, pady=(Styling.PADDING_SMALL, 0))
         
         self.tier_bounds_min_votes_var = tk.IntVar(value=current_value)
         
-        slider = tk.Scale(votes_frame, from_=5, to=50, resolution=1,
-                        orient=tk.HORIZONTAL, variable=self.tier_bounds_min_votes_var,
-                        command=lambda v: self.update_tier_bounds_min_votes_display(),
-                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
-                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_SUCCESS,
-                        length=400)
-        slider.pack(fill=tk.X, padx=20, pady=5)
-        
-        # Buttons
-        button_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
-        button_frame.pack(pady=10)
-        
-        tk.Button(button_frame, text="Preview Current Bounds", 
-                 command=self.preview_tier_bounds,
-                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
-        
-        tk.Button(button_frame, text="Reset to Defaults", 
-                 command=self.reset_tier_bounds_settings,
-                 bg=Colors.BUTTON_NEUTRAL, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
-        
-        # Debug button
-        tk.Button(button_frame, text="Debug State", 
-                 command=self.debug_tier_bounds_state,
-                 bg=Colors.BUTTON_DANGER, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        slider = ModernSlider(control_frame,
+                             from_=5, to=50, resolution=1,
+                             orient=tk.HORIZONTAL,
+                             variable=self.tier_bounds_min_votes_var,
+                             command=lambda v: self._update_votes_display())
+        slider.pack(fill=tk.X, pady=Styling.PADDING_SMALL)
     
-    def create_tier_distribution_section(self, parent: tk.Frame):
-        """Create the tier distribution settings section."""
-        section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
-        section.pack(fill=tk.X, padx=10, pady=5)
+    def _create_bounds_actions(self, parent):
+        """Create action buttons for tier bounds."""
+        button_frame = ModernFrame(parent)
+        button_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
-        tk.Label(section, text="Tier Distribution", 
-                font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=10)
+        preview_btn = ModernButton(button_frame, text="👁️ Preview Bounds", 
+                                  command=self._preview_tier_bounds, style='secondary')
+        preview_btn.pack(side=tk.LEFT, padx=(0, Styling.PADDING_SMALL))
         
-        description_text = ("Controls how tiers should be distributed. Lower values create tighter distribution around tier 0. "
-                          "This affects both the expected distribution and the tier bounds calculations.")
-        tk.Label(section, text=description_text, font=('Arial', 10, 'italic'), 
-                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, wraplength=850, justify=tk.LEFT).pack(pady=5)
+        reset_btn = ModernButton(button_frame, text="🔄 Reset to Defaults", 
+                                command=self._reset_tier_bounds, style='ghost')
+        reset_btn.pack(side=tk.LEFT)
+    
+    def _create_tier_distribution_section(self, parent):
+        """Create tier distribution section."""
+        card = ModernSettingsCard(parent, "Tier Distribution", "📊")
+        card.pack(fill=tk.X, pady=(0, Styling.PADDING_LARGE))
         
-        # Tier distribution std dev
-        tier_frame = tk.Frame(section, bg=Colors.BG_SECONDARY)
-        tier_frame.pack(padx=20, pady=10)
+        card.add_description("Control how tiers should be distributed. Lower values create tighter clustering around tier 0.")
         
-        tk.Label(tier_frame, text="Standard Deviation", 
-                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        # Standard deviation control
+        control_frame = ModernFrame(card.content_frame)
+        control_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
+        
+        label = ModernLabel(control_frame, text="Standard Deviation", font=Fonts.MEDIUM)
+        label.pack(anchor=tk.W)
         
         current_value = getattr(self.data_manager, 'tier_distribution_std', 1.5)
-        self.tier_std_label = tk.Label(tier_frame, text=f"Current: {current_value:.2f}", 
-                                      fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        self.tier_std_label.pack(anchor=tk.W)
+        self.tier_std_label = ModernLabel(control_frame, 
+                                         text=f"Current: {current_value:.2f}",
+                                         font=Fonts.SMALL, fg=Colors.PURPLE_PRIMARY)
+        self.tier_std_label.pack(anchor=tk.W, pady=(Styling.PADDING_SMALL, 0))
         
         self.tier_std_var = tk.DoubleVar(value=current_value)
         
-        slider = tk.Scale(tier_frame, from_=0.5, to=3.0, resolution=0.1,
-                        orient=tk.HORIZONTAL, variable=self.tier_std_var,
-                        command=lambda v: self.update_tier_std_display(),
-                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
-                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_INFO,
-                        length=400)
-        slider.pack(fill=tk.X, padx=20, pady=5)
+        slider = ModernSlider(control_frame,
+                             from_=0.5, to=3.0, resolution=0.1,
+                             orient=tk.HORIZONTAL,
+                             variable=self.tier_std_var,
+                             command=lambda v: self._update_tier_std_display())
+        slider.pack(fill=tk.X, pady=Styling.PADDING_SMALL)
         
-        button_frame = tk.Frame(tier_frame, bg=Colors.BG_SECONDARY)
-        button_frame.pack(pady=10)
+        # Actions
+        button_frame = ModernFrame(control_frame)
+        button_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
-        tk.Button(button_frame, text="Preview Distribution", 
-                 command=self.preview_distribution,
-                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        preview_btn = ModernButton(button_frame, text="📈 Preview Distribution", 
+                                  command=self._preview_distribution, style='secondary')
+        preview_btn.pack(side=tk.LEFT, padx=(0, Styling.PADDING_SMALL))
         
-        tk.Button(button_frame, text="Reset to Default (1.5)", 
-                 command=lambda: self.reset_setting(self.tier_std_var, 1.5, self.update_tier_std_display),
-                 bg=Colors.BUTTON_NEUTRAL, fg='white', relief=tk.FLAT).pack(side=tk.LEFT, padx=5)
+        reset_btn = ModernButton(button_frame, text="🔄 Reset (1.5)", 
+                                command=lambda: self._reset_single_setting(self.tier_std_var, 1.5, self._update_tier_std_display),
+                                style='ghost')
+        reset_btn.pack(side=tk.LEFT)
     
-    def create_overflow_detection_section(self, parent: tk.Frame):
-        """Create the overflow detection settings section."""
-        section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
-        section.pack(fill=tk.X, padx=10, pady=5)
+    def _create_overflow_detection_section(self, parent):
+        """Create overflow detection section."""
+        card = ModernSettingsCard(parent, "Overflow Detection", "🚨")
+        card.pack(fill=tk.X, pady=(0, Styling.PADDING_LARGE))
         
-        tk.Label(section, text="Tier Overflow Detection", 
-                font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(pady=10)
+        card.add_description("Control when a tier is considered 'overflowing' and needs attention from the algorithm.")
         
-        description_text = ("Controls when a tier is considered 'overflowing' and needs attention. "
-                          "The algorithm prioritizes pairs from overflowing tiers.")
-        tk.Label(section, text=description_text, font=('Arial', 10, 'italic'), 
-                fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY, wraplength=850, justify=tk.LEFT).pack(pady=5)
+        # Overflow threshold
+        threshold_frame = ModernFrame(card.content_frame)
+        threshold_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
-        controls_frame = tk.Frame(section, bg=Colors.BG_SECONDARY)
-        controls_frame.pack(padx=20, pady=10)
-        
-        # Overflow threshold setting
-        threshold_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
-        threshold_frame.pack(fill=tk.X, pady=5)
-        
-        tk.Label(threshold_frame, text="Overflow Threshold", 
-                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        label = ModernLabel(threshold_frame, text="Overflow Threshold", font=Fonts.MEDIUM)
+        label.pack(anchor=tk.W)
         
         current_value = getattr(self.data_manager, 'overflow_threshold', 1.0)
-        self.overflow_threshold_label = tk.Label(threshold_frame, text=f"Current: {current_value:.2f}x expected", 
-                                               fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        self.overflow_threshold_label.pack(anchor=tk.W)
+        self.overflow_threshold_label = ModernLabel(threshold_frame, 
+                                                   text=f"Current: {current_value:.2f}x expected",
+                                                   font=Fonts.SMALL, fg=Colors.PURPLE_PRIMARY)
+        self.overflow_threshold_label.pack(anchor=tk.W, pady=(Styling.PADDING_SMALL, 0))
         
         self.overflow_threshold_var = tk.DoubleVar(value=current_value)
         
-        slider = tk.Scale(threshold_frame, from_=0.5, to=2.0, resolution=0.1,
-                        orient=tk.HORIZONTAL, variable=self.overflow_threshold_var,
-                        command=lambda v: self.update_overflow_threshold_display(),
-                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
-                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_WARNING,
-                        length=400)
-        slider.pack(fill=tk.X, padx=20, pady=5)
+        slider = ModernSlider(threshold_frame,
+                             from_=0.5, to=2.0, resolution=0.1,
+                             orient=tk.HORIZONTAL,
+                             variable=self.overflow_threshold_var,
+                             command=lambda v: self._update_overflow_threshold_display())
+        slider.pack(fill=tk.X, pady=Styling.PADDING_SMALL)
         
-        # Minimum images setting
-        min_images_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
-        min_images_frame.pack(fill=tk.X, pady=5)
+        # Minimum images
+        min_images_frame = ModernFrame(card.content_frame)
+        min_images_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
-        tk.Label(min_images_frame, text="Minimum Images for Overflow", 
-                font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
+        label = ModernLabel(min_images_frame, text="Minimum Images for Overflow", font=Fonts.MEDIUM)
+        label.pack(anchor=tk.W)
         
         current_value = getattr(self.data_manager, 'min_overflow_images', 2)
-        self.min_overflow_images_label = tk.Label(min_images_frame, text=f"Current: {current_value} images", 
-                                                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
-        self.min_overflow_images_label.pack(anchor=tk.W)
+        self.min_overflow_images_label = ModernLabel(min_images_frame, 
+                                                    text=f"Current: {current_value} images",
+                                                    font=Fonts.SMALL, fg=Colors.PURPLE_PRIMARY)
+        self.min_overflow_images_label.pack(anchor=tk.W, pady=(Styling.PADDING_SMALL, 0))
         
         self.min_overflow_images_var = tk.IntVar(value=current_value)
         
-        slider = tk.Scale(min_images_frame, from_=2, to=10, resolution=1,
-                        orient=tk.HORIZONTAL, variable=self.min_overflow_images_var,
-                        command=lambda v: self.update_min_overflow_images_display(),
-                        bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY, 
-                        troughcolor=Colors.BG_TERTIARY, activebackground=Colors.BUTTON_WARNING,
-                        length=400)
-        slider.pack(fill=tk.X, padx=20, pady=5)
+        slider = ModernSlider(min_images_frame,
+                             from_=2, to=10, resolution=1,
+                             orient=tk.HORIZONTAL,
+                             variable=self.min_overflow_images_var,
+                             command=lambda v: self._update_min_overflow_images_display())
+        slider.pack(fill=tk.X, pady=Styling.PADDING_SMALL)
         
         # Reset button
-        tk.Button(controls_frame, text="Reset Overflow Settings to Defaults", 
-                 command=self.reset_overflow_settings,
-                 bg=Colors.BUTTON_NEUTRAL, fg='white', relief=tk.FLAT).pack(pady=10)
+        reset_btn = ModernButton(card.content_frame, text="🔄 Reset Overflow Settings", 
+                                command=self._reset_overflow_settings, style='ghost')
+        reset_btn.pack(pady=Styling.PADDING_MEDIUM)
     
-    def create_status_section(self, parent: tk.Frame):
-        """Create the status section showing current tier bounds information."""
-        section = tk.Frame(parent, bg=Colors.BG_TERTIARY, relief=tk.RAISED, borderwidth=1)
-        section.pack(fill=tk.X, padx=10, pady=5)
+    def _create_status_section(self, parent):
+        """Create status display section."""
+        card = ModernSettingsCard(parent, "Current Status", "📋")
+        card.pack(fill=tk.X, pady=(0, Styling.PADDING_LARGE))
         
-        tk.Label(section, text="📊 Current Status", 
-                font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY).pack(pady=10)
+        card.add_description("Live preview of your current algorithm configuration and its effects.")
         
-        # Status will be updated in update_status_display
-        self.status_text_label = tk.Label(section, text="Loading status...", 
-                                        font=('Arial', 10), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_TERTIARY, 
-                                        justify=tk.LEFT, wraplength=850)
-        self.status_text_label.pack(padx=10, pady=5)
+        # Status display
+        status_frame = ModernFrame(card.content_frame, style='card')
+        status_frame.pack(fill=tk.X, pady=Styling.PADDING_MEDIUM)
         
-        tk.Button(section, text="Refresh Status", 
-                 command=self.update_status_display,
-                 bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT).pack(pady=10)
+        self.status_text_label = ModernLabel(status_frame,
+                                           text="Loading status...",
+                                           font=Fonts.SMALL,
+                                           fg=Colors.TEXT_SECONDARY,
+                                           justify=tk.LEFT,
+                                           wraplength=800)
+        self.status_text_label.pack(padx=Styling.PADDING_MEDIUM, pady=Styling.PADDING_MEDIUM)
+        
+        # Refresh button
+        refresh_btn = ModernButton(card.content_frame, text="🔄 Refresh Status", 
+                                  command=self._update_status_display, style='secondary')
+        refresh_btn.pack(pady=Styling.PADDING_MEDIUM)
     
-    def update_tier_bounds_std_multiplier_display(self):
-        """Update the tier bounds standard deviation multiplier display."""
-        if self.tier_bounds_std_multiplier_var is not None:
+    def _create_action_buttons(self, parent):
+        """Create main action buttons."""
+        button_frame = ModernFrame(parent)
+        button_frame.pack(fill=tk.X, pady=Styling.PADDING_LARGE)
+        
+        # Apply button
+        apply_btn = ModernButton(button_frame, text="✅ Apply Changes", 
+                                command=self._apply_changes, style='success')
+        apply_btn.pack(side=tk.LEFT, padx=(0, Styling.PADDING_MEDIUM))
+        
+        # Cancel button
+        cancel_btn = ModernButton(button_frame, text="❌ Cancel", 
+                                 command=self.close_window, style='error')
+        cancel_btn.pack(side=tk.LEFT)
+    
+    # Display update methods
+    def _update_bounds_size_display(self):
+        """Update bounds size display."""
+        if self.tier_bounds_std_multiplier_var:
             value = self.tier_bounds_std_multiplier_var.get()
             self.tier_bounds_std_multiplier_label.config(text=f"Current: {value:.1f} std devs")
     
-    def update_tier_bounds_min_confidence_display(self):
-        """Update the tier bounds minimum confidence display."""
-        if self.tier_bounds_min_confidence_var is not None:
+    def _update_confidence_display(self):
+        """Update confidence display."""
+        if self.tier_bounds_min_confidence_var:
             value = self.tier_bounds_min_confidence_var.get()
             self.tier_bounds_min_confidence_label.config(text=f"Current: {value:.1%}")
     
-    def update_tier_bounds_min_votes_display(self):
-        """Update the tier bounds minimum votes display."""
-        if self.tier_bounds_min_votes_var is not None:
+    def _update_votes_display(self):
+        """Update votes display."""
+        if self.tier_bounds_min_votes_var:
             value = self.tier_bounds_min_votes_var.get()
             self.tier_bounds_min_votes_label.config(text=f"Current: {value} votes")
     
-    def update_tier_std_display(self):
-        """Update the tier standard deviation display."""
-        if self.tier_std_var is not None:
+    def _update_tier_std_display(self):
+        """Update tier std display."""
+        if self.tier_std_var:
             value = self.tier_std_var.get()
             self.tier_std_label.config(text=f"Current: {value:.2f}")
     
-    def update_overflow_threshold_display(self):
-        """Update the overflow threshold display."""
-        if self.overflow_threshold_var is not None:
+    def _update_overflow_threshold_display(self):
+        """Update overflow threshold display."""
+        if self.overflow_threshold_var:
             value = self.overflow_threshold_var.get()
             self.overflow_threshold_label.config(text=f"Current: {value:.2f}x expected")
     
-    def update_min_overflow_images_display(self):
-        """Update the minimum overflow images display."""
-        if self.min_overflow_images_var is not None:
+    def _update_min_overflow_images_display(self):
+        """Update min overflow images display."""
+        if self.min_overflow_images_var:
             value = self.min_overflow_images_var.get()
             self.min_overflow_images_label.config(text=f"Current: {value} images")
     
-    def update_status_display(self):
-        """Update the status display with current tier bounds information."""
+    def _update_status_display(self):
+        """Update status display."""
         try:
-            # Temporarily apply current settings to get preview
-            temp_enabled = self.tier_bounds_enabled_var.get()
-            temp_std_mult = self.tier_bounds_std_multiplier_var.get()
-            temp_min_conf = self.tier_bounds_min_confidence_var.get()
-            temp_min_votes = self.tier_bounds_min_votes_var.get()
-            temp_adaptive = self.tier_bounds_adaptive_var.get()
-            
-            # Save current settings
-            old_enabled = getattr(self.data_manager, 'tier_bounds_enabled', True)
-            old_std_mult = getattr(self.data_manager, 'tier_bounds_std_multiplier', 3.0)
-            old_min_conf = getattr(self.data_manager, 'tier_bounds_min_confidence', 0.8)
-            old_min_votes = getattr(self.data_manager, 'tier_bounds_min_votes', 10)
-            old_adaptive = getattr(self.data_manager, 'tier_bounds_adaptive', True)
-            
-            # Temporarily set new values
-            self.data_manager.tier_bounds_enabled = temp_enabled
-            self.data_manager.tier_bounds_std_multiplier = temp_std_mult
-            self.data_manager.tier_bounds_min_confidence = temp_min_conf
-            self.data_manager.tier_bounds_min_votes = temp_min_votes
-            self.data_manager.tier_bounds_adaptive = temp_adaptive
-            
-            # Get status
+            # Get current bounds info
             bounds_info = self.data_manager.get_tier_bounds_info()
             
-            # Restore old values
-            self.data_manager.tier_bounds_enabled = old_enabled
-            self.data_manager.tier_bounds_std_multiplier = old_std_mult
-            self.data_manager.tier_bounds_min_confidence = old_min_conf
-            self.data_manager.tier_bounds_min_votes = old_min_votes
-            self.data_manager.tier_bounds_adaptive = old_adaptive
-            
             if bounds_info['enabled']:
-                status_text = f"""Current Tier Bounds Status (Preview):
+                status_text = f"""🎯 TIER BOUNDS STATUS
 
-Bounds Range: Tier {bounds_info['min_tier']:+d} to Tier {bounds_info['max_tier']:+d}
+Range: Tier {bounds_info['min_tier']:+d} to Tier {bounds_info['max_tier']:+d}
 Total Images: {bounds_info['total_images']}
-Images at Lower Bound: {bounds_info['images_at_min_bound']}
-Images at Upper Bound: {bounds_info['images_at_max_bound']}
-Images Qualified to Exceed Bounds: {bounds_info['qualified_for_bounds']}
+Images at Bounds: {bounds_info['images_at_min_bound']} (min) | {bounds_info['images_at_max_bound']} (max)
+Qualified for Extremes: {bounds_info['qualified_for_bounds']} images
 
-Configuration:
-• Standard Deviation Multiplier: {bounds_info['std_multiplier']:.1f}
-• Minimum Confidence: {bounds_info['min_confidence']:.1%}
-• Minimum Votes: {bounds_info['min_votes']}
-• Adaptive Bounds: {'Yes' if bounds_info['adaptive'] else 'No'}
+📊 CONFIGURATION
+• Std Dev Multiplier: {bounds_info['std_multiplier']:.1f}
+• Min Confidence: {bounds_info['min_confidence']:.1%}
+• Min Votes: {bounds_info['min_votes']}
+• Adaptive: {'Yes' if bounds_info['adaptive'] else 'No'}
 
-Status: {'✅ Tier bounds are active and managing tier growth' if bounds_info['enabled'] else '❌ Tier bounds are disabled'}"""
+✅ Tier bounds are actively managing your collection"""
             else:
-                status_text = "Tier bounds are disabled. Tiers can grow indefinitely."
+                status_text = "❌ Tier bounds are disabled - tiers can grow indefinitely"
         
         except Exception as e:
-            status_text = f"Error getting status: {e}"
+            status_text = f"❌ Error loading status: {e}"
         
-        if hasattr(self, 'status_text_label'):
+        if self.status_text_label:
             self.status_text_label.config(text=status_text)
     
-    def on_tier_bounds_enabled_change(self):
-        """Handle tier bounds enabled/disabled change."""
+    def _on_tier_bounds_enabled_change(self):
+        """Handle tier bounds enabled change."""
         enabled = self.tier_bounds_enabled_var.get()
         
-        # Update status label
-        if hasattr(self, 'tier_bounds_status_label'):
+        if self.tier_bounds_status_label:
             self.tier_bounds_status_label.config(
                 text="Status: Enabled" if enabled else "Status: Disabled",
-                fg=Colors.TEXT_SUCCESS if enabled else Colors.TEXT_ERROR
+                fg=Colors.SUCCESS if enabled else Colors.ERROR
             )
         
-        # Update overall status display
-        self.update_status_display()
+        self._update_status_display()
     
-    def debug_tier_bounds_state(self):
-        """Debug function to show current state of all tier bounds variables."""
+    # Preview methods
+    def _preview_tier_bounds(self):
+        """Preview tier bounds."""
         try:
-            debug_info = f"""DEBUG: Tier Bounds State
-            
-UI Variables:
-• tier_bounds_enabled_var: {self.tier_bounds_enabled_var.get() if self.tier_bounds_enabled_var else 'None'}
-• tier_bounds_std_multiplier_var: {self.tier_bounds_std_multiplier_var.get() if self.tier_bounds_std_multiplier_var else 'None'}
-• tier_bounds_min_confidence_var: {self.tier_bounds_min_confidence_var.get() if self.tier_bounds_min_confidence_var else 'None'}
-• tier_bounds_min_votes_var: {self.tier_bounds_min_votes_var.get() if self.tier_bounds_min_votes_var else 'None'}
-• tier_bounds_adaptive_var: {self.tier_bounds_adaptive_var.get() if self.tier_bounds_adaptive_var else 'None'}
-
-Data Manager Attributes:
-• tier_bounds_enabled: {getattr(self.data_manager, 'tier_bounds_enabled', 'NOT SET')}
-• tier_bounds_std_multiplier: {getattr(self.data_manager, 'tier_bounds_std_multiplier', 'NOT SET')}
-• tier_bounds_min_confidence: {getattr(self.data_manager, 'tier_bounds_min_confidence', 'NOT SET')}
-• tier_bounds_min_votes: {getattr(self.data_manager, 'tier_bounds_min_votes', 'NOT SET')}
-• tier_bounds_adaptive: {getattr(self.data_manager, 'tier_bounds_adaptive', 'NOT SET')}
-
-Status Label Text: {self.tier_bounds_status_label.cget('text') if hasattr(self, 'tier_bounds_status_label') else 'NOT SET'}"""
-            
-            messagebox.showinfo("Debug Info", debug_info)
-        except Exception as e:
-            messagebox.showerror("Debug Error", f"Error getting debug info: {e}")
-    
-    def preview_tier_bounds(self):
-        """Show a preview of the current tier bounds."""
-        try:
-            # Get current settings
             enabled = self.tier_bounds_enabled_var.get()
             std_mult = self.tier_bounds_std_multiplier_var.get()
             min_conf = self.tier_bounds_min_confidence_var.get()
@@ -557,54 +597,41 @@ Status Label Text: {self.tier_bounds_status_label.cget('text') if hasattr(self, 
             adaptive = self.tier_bounds_adaptive_var.get()
             
             if not enabled:
-                messagebox.showinfo("Tier Bounds Preview", "Tier bounds are disabled. Tiers can grow indefinitely.")
+                self._show_info_dialog("Tier Bounds Preview", "🚫 Tier bounds are disabled.\nTiers can grow indefinitely.")
                 return
             
-            # Calculate bounds
             tier_std = self.tier_std_var.get()
             base_bound = int(tier_std * std_mult)
             
-            preview_text = f"Tier Bounds Preview:\n\n"
-            preview_text += f"Base Bounds: Tier {-base_bound:+d} to Tier {+base_bound:+d}\n"
-            preview_text += f"(Based on {std_mult:.1f} × {tier_std:.1f} std dev)\n\n"
+            preview_text = f"""🎯 TIER BOUNDS PREVIEW
+
+Base Bounds: Tier {-base_bound:+d} to Tier {+base_bound:+d}
+(Based on {std_mult:.1f} × {tier_std:.1f} std dev)
+
+"""
             
             if adaptive:
                 total_images = len(self.data_manager.image_stats)
                 adaptive_bonus = int(math.log10(max(total_images, 10)) - 2) if total_images > 100 else 0
-                preview_text += f"Adaptive Bonus: +{adaptive_bonus} tiers (collection size: {total_images})\n"
-                preview_text += f"Final Bounds: Tier {-base_bound-adaptive_bonus:+d} to Tier {+base_bound+adaptive_bonus:+d}\n\n"
+                preview_text += f"""📈 Adaptive Bonus: +{adaptive_bonus} tiers
+Final Bounds: Tier {-base_bound-adaptive_bonus:+d} to Tier {+base_bound+adaptive_bonus:+d}
+
+"""
             
-            preview_text += f"Qualification Requirements:\n"
-            preview_text += f"• Minimum Confidence: {min_conf:.1%}\n"
-            preview_text += f"• Minimum Votes: {min_votes}\n\n"
+            preview_text += f"""⚙️ QUALIFICATION RULES
+• Min Confidence: {min_conf:.1%}
+• Min Votes: {min_votes}
+
+Images within bounds move freely.
+Images at bounds need qualification to move further."""
             
-            preview_text += f"Effect: Images within bounds move freely.\n"
-            preview_text += f"Images at bounds need high confidence to move further."
-            
-            messagebox.showinfo("Tier Bounds Preview", preview_text)
+            self._show_info_dialog("Tier Bounds Preview", preview_text)
             
         except Exception as e:
-            messagebox.showerror("Error", f"Error previewing tier bounds: {e}")
+            self._show_error_dialog("Preview Error", f"Error previewing bounds: {e}")
     
-    def reset_tier_bounds_settings(self):
-        """Reset tier bounds settings to defaults."""
-        self.tier_bounds_enabled_var.set(True)
-        self.tier_bounds_std_multiplier_var.set(3.0)
-        self.tier_bounds_min_confidence_var.set(0.8)
-        self.tier_bounds_min_votes_var.set(10)
-        self.tier_bounds_adaptive_var.set(True)
-        
-        # Update status label
-        if hasattr(self, 'tier_bounds_status_label'):
-            self.tier_bounds_status_label.config(
-                text="Status: Enabled",
-                fg=Colors.TEXT_SUCCESS
-            )
-        
-        self.update_all_displays()
-    
-    def preview_distribution(self):
-        """Show a preview of the tier distribution."""
+    def _preview_distribution(self):
+        """Preview tier distribution."""
         std_dev = self.tier_std_var.get()
         
         tiers = list(range(-5, 6))
@@ -617,7 +644,7 @@ Status Label Text: {self.tier_bounds_status_label.cget('text') if hasattr(self, 
         total_density = sum(proportions)
         normalized_proportions = [p / total_density for p in proportions]
         
-        preview_text = f"Expected Distribution (std dev = {std_dev:.1f}):\n\n"
+        preview_text = f"📊 EXPECTED DISTRIBUTION (std dev = {std_dev:.1f})\n\n"
         
         for tier, proportion in zip(tiers, normalized_proportions):
             percentage = proportion * 100
@@ -625,58 +652,81 @@ Status Label Text: {self.tier_bounds_status_label.cget('text') if hasattr(self, 
             bar = "█" * bar_length
             preview_text += f"Tier {tier:+2d}: {percentage:5.1f}% {bar}\n"
         
-        messagebox.showinfo("Tier Distribution Preview", preview_text)
+        self._show_info_dialog("Distribution Preview", preview_text)
     
-    def reset_setting(self, var, default_value, update_func):
-        """Reset a single setting to its default value."""
-        var.set(default_value)
+    # Reset methods
+    def _reset_tier_bounds(self):
+        """Reset tier bounds to defaults."""
+        self.tier_bounds_enabled_var.set(True)
+        self.tier_bounds_std_multiplier_var.set(3.0)
+        self.tier_bounds_min_confidence_var.set(0.8)
+        self.tier_bounds_min_votes_var.set(10)
+        self.tier_bounds_adaptive_var.set(True)
+        
+        self._update_bounds_size_display()
+        self._update_confidence_display()
+        self._update_votes_display()
+        self._on_tier_bounds_enabled_change()
+    
+    def _reset_single_setting(self, var, value, update_func):
+        """Reset a single setting."""
+        var.set(value)
         update_func()
     
-    def reset_overflow_settings(self):
-        """Reset overflow detection settings to defaults."""
+    def _reset_overflow_settings(self):
+        """Reset overflow settings."""
         self.overflow_threshold_var.set(1.0)
         self.min_overflow_images_var.set(2)
-        self.update_overflow_threshold_display()
-        self.update_min_overflow_images_display()
+        self._update_overflow_threshold_display()
+        self._update_min_overflow_images_display()
     
-    def update_all_displays(self):
-        """Update all setting displays."""
-        self.update_tier_bounds_std_multiplier_display()
-        self.update_tier_bounds_min_confidence_display()
-        self.update_tier_bounds_min_votes_display()
-        self.update_tier_std_display()
-        self.update_overflow_threshold_display()
-        self.update_min_overflow_images_display()
-        self.update_status_display()
-    
-    def apply_changes(self):
-        """Apply the setting changes."""
-        # Apply tier bounds settings
-        if self.tier_bounds_enabled_var is not None:
+    def _apply_changes(self):
+        """Apply all changes."""
+        try:
+            # Apply tier bounds settings
             self.data_manager.tier_bounds_enabled = self.tier_bounds_enabled_var.get()
-        if self.tier_bounds_std_multiplier_var is not None:
             self.data_manager.tier_bounds_std_multiplier = self.tier_bounds_std_multiplier_var.get()
-        if self.tier_bounds_min_confidence_var is not None:
             self.data_manager.tier_bounds_min_confidence = self.tier_bounds_min_confidence_var.get()
-        if self.tier_bounds_min_votes_var is not None:
             self.data_manager.tier_bounds_min_votes = self.tier_bounds_min_votes_var.get()
-        if self.tier_bounds_adaptive_var is not None:
             self.data_manager.tier_bounds_adaptive = self.tier_bounds_adaptive_var.get()
-        
-        # Apply existing settings
-        if self.tier_std_var is not None:
+            
+            # Apply other settings
             self.data_manager.tier_distribution_std = self.tier_std_var.get()
-        if self.overflow_threshold_var is not None:
             self.data_manager.overflow_threshold = self.overflow_threshold_var.get()
-        if self.min_overflow_images_var is not None:
             self.data_manager.min_overflow_images = self.min_overflow_images_var.get()
-        
-        bounds_status = "enabled" if self.data_manager.tier_bounds_enabled else "disabled"
-        messagebox.showinfo("Success", f"Settings updated successfully!\n\nTier bounds are now {bounds_status}.\nChanges will take effect immediately and will be saved when you save your progress.")
-        self.close_window()
+            
+            bounds_status = "enabled" if self.data_manager.tier_bounds_enabled else "disabled"
+            self._show_success_dialog("Settings Applied", 
+                                     f"✅ All settings updated successfully!\n\n"
+                                     f"Tier bounds: {bounds_status}\n"
+                                     f"Changes are active immediately.")
+            
+            self.close_window()
+            
+        except Exception as e:
+            self._show_error_dialog("Apply Error", f"Error applying settings: {e}")
+    
+    # Dialog methods
+    def _show_info_dialog(self, title, message):
+        """Show info dialog."""
+        messagebox.showinfo(title, message)
+    
+    def _show_success_dialog(self, title, message):
+        """Show success dialog."""
+        messagebox.showinfo(title, message)
+    
+    def _show_error_dialog(self, title, message):
+        """Show error dialog."""
+        messagebox.showerror(title, message)
     
     def close_window(self):
-        """Handle window closing."""
+        """Close the settings window."""
         if self.window:
             self.window.destroy()
             self.window = None
+
+
+# Backward compatibility
+class SettingsWindow(ModernSettingsWindow):
+    """Backward compatibility alias."""
+    pass
