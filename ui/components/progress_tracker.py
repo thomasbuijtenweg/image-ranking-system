@@ -13,22 +13,17 @@ from ui.components.ui_builder import ModernFrame, ModernLabel, ModernButton
 
 
 class ModernProgressBar(ttk.Progressbar):
-    """Custom progress bar with modern styling."""
+    """Simple progress bar that actually works."""
     
     def __init__(self, parent, **kwargs):
-        super().__init__(parent, **kwargs)
+        # Remove parameters that ttk.Progressbar doesn't accept
+        clean_kwargs = {}
+        for key, value in kwargs.items():
+            if key not in ['height', 'width']:
+                clean_kwargs[key] = value
         
-        # Apply modern styling through ttk.Style
-        style = ttk.Style()
-        style.configure("Modern.TProgressbar",
-                       background=Colors.PURPLE_PRIMARY,
-                       troughcolor=Colors.BG_TERTIARY,
-                       borderwidth=0,
-                       lightcolor=Colors.PURPLE_PRIMARY,
-                       darkcolor=Colors.PURPLE_PRIMARY,
-                       relief='flat')
-        
-        self.configure(style="Modern.TProgressbar")
+        # Just use the standard progressbar
+        super().__init__(parent, **clean_kwargs)
 
 
 class ModernProgressWindow:
@@ -122,12 +117,10 @@ class ModernProgressWindow:
         progress_label.pack(pady=(0, Styling.PADDING_MEDIUM))
         
         # Progress bar
-        self.progress_var = tk.IntVar()
         self.progress_bar = ModernProgressBar(progress_frame, 
                                             variable=self.progress_var,
                                             maximum=self.total_items,
                                             length=400,
-                                            height=20,
                                             mode='determinate')
         self.progress_bar.pack(pady=(0, Styling.PADDING_MEDIUM))
         
@@ -279,8 +272,8 @@ class ModernIndeterminateProgress:
         # Indeterminate progress bar
         self.progress_bar = ModernProgressBar(main_container, 
                                             mode='indeterminate',
-                                            length=350,
-                                            height=15)
+                                            length=350)
+
         self.progress_bar.pack(pady=(0, Styling.PADDING_MEDIUM))
         self.progress_bar.start(10)  # Start animation
         

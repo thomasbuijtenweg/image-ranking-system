@@ -15,6 +15,7 @@ class Colors:
     TEXT_SECONDARY = '#b3b3b3'   # Light grey
     TEXT_TERTIARY = '#808080'    # Medium grey
     TEXT_MUTED = '#666666'       # Dark grey
+    TEXT_INFO = '#8b5cf6'        # Add this line - Purple for info text
     
     # Purple accent colors
     PURPLE_PRIMARY = '#8b5cf6'   # Main purple
@@ -34,7 +35,7 @@ class Colors:
     BUTTON_SUCCESS = SUCCESS
     BUTTON_WARNING = WARNING
     BUTTON_ERROR = ERROR
-    BUTTON_GHOST = 'transparent'
+    BUTTON_GHOST = BG_SECONDARY  # Use background color instead of transparent
     
     # Border and separator colors
     BORDER_PRIMARY = '#404040'

@@ -175,6 +175,10 @@ class ImagePreviewMixin:
         if not filename or not hasattr(self, 'data_manager') or not self.data_manager.image_folder:
             return
         
+        # Check if image_label exists and is valid
+        if not self.image_label or not self.image_label.winfo_exists():
+            return
+
         try:
             img_path = os.path.join(self.data_manager.image_folder, filename)
             if not os.path.exists(img_path):
@@ -182,14 +186,24 @@ class ImagePreviewMixin:
             
             # Update window to get dimensions
             window_ref = self.window if hasattr(self, 'window') else self.root
+            if not window_ref:
+                return
+                
             window_ref.update_idletasks()
             
-            # Get label dimensions
-            label_width = self.image_label.winfo_width()
-            label_height = self.image_label.winfo_height()
+            # Get label dimensions with safety checks
+            try:
+                label_width = self.image_label.winfo_width()
+                label_height = self.image_label.winfo_height()
+            except (tk.TclError, AttributeError):
+                # If we can't get dimensions, use defaults
+                label_width = 400
+                label_height = 400
             
             if label_width <= 1 or label_height <= 1:
-                window_ref.after(100, lambda: self.display_preview_image(filename))
+                # Try again later if widget isn't ready
+                if window_ref:
+                    window_ref.after(100, lambda: self.display_preview_image(filename))
                 return
             
             # Calculate preview size
@@ -197,14 +211,17 @@ class ImagePreviewMixin:
             preview_height = max(label_height - 20, 300)
             
             # Load and display image
-            photo = self.image_processor.load_and_resize_image(
-                img_path, preview_width, preview_height)
-            
-            if photo:
-                self.current_image = photo
-                self.image_label.config(image=photo, text="", bg=Colors.BG_TERTIARY)
-                self.current_displayed_image = filename
-                self.update_image_info_display(filename)
+            if hasattr(self, 'image_processor') and self.image_processor:
+                photo = self.image_processor.load_and_resize_image(
+                    img_path, preview_width, preview_height)
+                
+                if photo:
+                    self.current_image = photo
+                    self.image_label.config(image=photo, text="", bg=Colors.BG_TERTIARY)
+                    self.current_displayed_image = filename
+                    self.update_image_info_display(filename)
+                else:
+                    self.handle_image_load_error(filename)
             else:
                 self.handle_image_load_error(filename)
                 
