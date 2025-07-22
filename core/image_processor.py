@@ -1,4 +1,4 @@
-"""Optimized image processor with file scanning and metadata extraction."""
+"""Optimized image processor with file scanning and metadata extraction - excludes Bin folder."""
 
 import os
 import fnmatch
@@ -12,7 +12,7 @@ from core.metadata_extractor import MetadataExtractor
 
 
 class ImageProcessor:
-    """Optimized image processor for large collections."""
+    """Optimized image processor for large collections - excludes binned images."""
     
     def __init__(self):
         self.supported_extensions = Defaults.SUPPORTED_IMAGE_EXTENSIONS
@@ -21,7 +21,7 @@ class ImageProcessor:
         self._cache_lock = threading.Lock()
     
     def get_image_files(self, folder_path: str, use_cache: bool = True) -> List[str]:
-        """Get all supported image files from a folder."""
+        """Get all supported image files from a folder, excluding the Bin subfolder."""
         if not os.path.exists(folder_path):
             return []
         
@@ -53,13 +53,19 @@ class ImageProcessor:
         return image_files
     
     def _scan_folder_optimized(self, folder_path: str) -> List[str]:
-        """Optimized folder scanning with better performance."""
+        """Optimized folder scanning with better performance - excludes Bin folder."""
         image_files = []
         extensions_lower = set(ext.lower() for ext in self.supported_extensions)
         
         try:
             for root, dirs, files in os.walk(folder_path, followlinks=False):
-                dirs[:] = [d for d in dirs if not d.startswith('.')]
+                # Skip hidden directories and the Bin folder
+                dirs[:] = [d for d in dirs if not d.startswith('.') and d.lower() != 'bin']
+                
+                # Skip if we're inside a Bin folder
+                relative_root = os.path.relpath(root, folder_path)
+                if relative_root.lower().startswith('bin') or 'bin' in relative_root.lower().split(os.sep):
+                    continue
                 
                 batch_size = 1000
                 for i in range(0, len(files), batch_size):
@@ -74,7 +80,10 @@ class ImageProcessor:
                             full_path = os.path.join(root, file)
                             relative_path = os.path.relpath(full_path, folder_path)
                             relative_path = relative_path.replace(os.sep, '/')
-                            image_files.append(relative_path)
+                            
+                            # Double-check that this isn't in a Bin folder
+                            if not relative_path.lower().startswith('bin/'):
+                                image_files.append(relative_path)
             
             return sorted(image_files)
             

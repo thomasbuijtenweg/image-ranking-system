@@ -1,8 +1,8 @@
 """
-UI builder for the Image Ranking System.
+UI builder for the Image Ranking System with binning support.
 
 This module handles the creation and layout of UI widgets
-for the main window.
+for the main window including the new bin management button.
 """
 
 import tkinter as tk
@@ -104,7 +104,7 @@ class UIBuilder:
                                    fg=Colors.TEXT_SECONDARY, bg=Colors.BG_PRIMARY)
         self.folder_label.pack(side=tk.LEFT, padx=20)
         
-        self.stats_label = tk.Label(top_frame, text="Total votes: 0", 
+        self.stats_label = tk.Label(top_frame, text="Votes: 0 | Available: 0", 
                                   font=('Arial', 10, 'bold'), 
                                   fg=Colors.TEXT_PRIMARY, bg=Colors.BG_PRIMARY)
         self.stats_label.pack(side=tk.RIGHT, padx=10)
@@ -139,6 +139,7 @@ class UIBuilder:
             ("Load Progress", "load_data", Colors.BUTTON_INFO),
             ("View Stats", "show_stats", Colors.BUTTON_WARNING),
             ("Prompt Analysis", "show_prompt_analysis", Colors.BUTTON_INFO),
+            ("🗑️ Bin Management", "show_bin_management", Colors.BUTTON_DANGER),
             ("Settings", "show_settings", Colors.BUTTON_NEUTRAL)
         ]
         
@@ -160,7 +161,7 @@ class UIBuilder:
     
     def setup_window_properties(self) -> None:
         """Setup basic window properties."""
-        self.parent.title("Image Ranking System")
+        self.parent.title("Image Ranking System with Binning")
         self.parent.geometry(f"{Defaults.WINDOW_WIDTH}x{Defaults.WINDOW_HEIGHT}")
         self.maximize_window()
     

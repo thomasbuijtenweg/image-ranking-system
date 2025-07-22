@@ -1,11 +1,11 @@
-"""Enhanced Data Manager with intelligent tier bounds."""
+"""Enhanced Data Manager with intelligent tier bounds and binning support."""
 
 import json
 import os
 import math
 import statistics
 from datetime import datetime
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, Set, List
 from collections import defaultdict
 
 from config import Defaults
@@ -13,7 +13,7 @@ from core.weight_manager import WeightManager
 
 
 class DataManager:
-    """Handles data persistence and ranking statistics with intelligent tier bounds."""
+    """Handles data persistence and ranking statistics with intelligent tier bounds and binning."""
     
     def __init__(self):
         self.weight_manager = WeightManager()
@@ -28,6 +28,9 @@ class DataManager:
         self.weight_manager.reset_to_defaults()
         self._last_calculated_rankings = None
         self._last_calculation_vote_count = -1
+        
+        # Binning support
+        self.binned_images = set()
         
         # Initialize algorithm settings
         self.tier_distribution_std = 1.5
@@ -44,6 +47,63 @@ class DataManager:
         self.tier_bounds_min_votes = 10  # Minimum votes to exceed bounds
         self.tier_bounds_adaptive = True  # Allow bounds to grow with collection
     
+    def get_available_images(self) -> List[str]:
+        """
+        Get list of images available for voting (excludes binned images).
+        
+        Returns:
+            List of image filenames that are not binned
+        """
+        all_images = list(self.image_stats.keys())
+        available_images = [img for img in all_images if img not in self.binned_images]
+        return available_images
+    
+    def is_image_binned(self, image_filename: str) -> bool:
+        """
+        Check if an image is binned.
+        
+        Args:
+            image_filename: Name of the image file (should be original filename, not Bin/ prefixed)
+            
+        Returns:
+            True if the image is binned, False otherwise
+        """
+        # Clean the filename - remove any Bin/ prefix
+        original_filename = image_filename[4:] if image_filename.startswith('Bin/') else image_filename
+        return original_filename in self.binned_images
+    
+    def debug_image_status(self, image_filename: str) -> Dict[str, Any]:
+        """
+        Debug method to check image status across all systems.
+        
+        Args:
+            image_filename: Name of the image file to debug
+            
+        Returns:
+            Dictionary with debug information
+        """
+        # Clean filename
+        original_filename = image_filename[4:] if image_filename.startswith('Bin/') else image_filename
+        
+        return {
+            'input_filename': image_filename,
+            'original_filename': original_filename,
+            'in_image_stats': original_filename in self.image_stats,
+            'is_binned': self.is_image_binned(original_filename),
+            'binned_images_count': len(self.binned_images),
+            'image_stats_keys_sample': list(self.image_stats.keys())[:5],
+            'binned_images_sample': list(self.binned_images)[:5] if self.binned_images else []
+        }
+    
+    def get_binned_images(self) -> Set[str]:
+        """
+        Get the set of all binned images.
+        
+        Returns:
+            Set of binned image filenames
+        """
+        return self.binned_images.copy()
+    
     def calculate_tier_bounds(self) -> Tuple[int, int]:
         """
         Calculate the current tier bounds based on standard deviation and collection size.
@@ -59,15 +119,16 @@ class DataManager:
         
         if self.tier_bounds_adaptive:
             # Adaptive bounds grow with collection size
-            total_images = len(self.image_stats)
+            available_images = self.get_available_images()  # Exclude binned images
+            total_images = len(available_images)
             
             # Allow more tiers for larger collections
             # log scaling: 100 images = +0 tiers, 1000 images = +1 tier, 10000 images = +2 tiers
             adaptive_bonus = int(math.log10(max(total_images, 10)) - 2) if total_images > 100 else 0
             
-            # Also consider current tier distribution
-            if self.image_stats:
-                current_tiers = [stats.get('current_tier', 0) for stats in self.image_stats.values()]
+            # Also consider current tier distribution (excluding binned images)
+            if available_images:
+                current_tiers = [self.image_stats[img].get('current_tier', 0) for img in available_images]
                 current_min = min(current_tiers)
                 current_max = max(current_tiers)
                 
@@ -95,6 +156,10 @@ class DataManager:
         """
         if not self.tier_bounds_enabled:
             return True, "Tier bounds disabled"
+        
+        # Binned images can't move (they're at tier -999)
+        if self.is_image_binned(image_name):
+            return False, "Image is binned"
         
         min_tier, max_tier = self.calculate_tier_bounds()
         
@@ -130,6 +195,11 @@ class DataManager:
     
     def record_vote(self, winner: str, loser: str) -> None:
         """Record a vote between two images with tier bounds checking."""
+        # Check if either image is binned - this shouldn't happen but let's be safe
+        if self.is_image_binned(winner) or self.is_image_binned(loser):
+            print(f"Warning: Attempted to vote on binned image(s): {winner}, {loser}")
+            return
+        
         self.vote_count += 1
         
         # Calculate target tiers
@@ -184,15 +254,17 @@ class DataManager:
         
         min_tier, max_tier = self.calculate_tier_bounds()
         
-        # Count images at bounds
-        at_min_bound = sum(1 for stats in self.image_stats.values() 
-                          if stats.get('current_tier', 0) <= min_tier)
-        at_max_bound = sum(1 for stats in self.image_stats.values() 
-                          if stats.get('current_tier', 0) >= max_tier)
+        # Count images at bounds (excluding binned images)
+        available_images = self.get_available_images()
+        at_min_bound = sum(1 for img in available_images 
+                          if self.image_stats[img].get('current_tier', 0) <= min_tier)
+        at_max_bound = sum(1 for img in available_images 
+                          if self.image_stats[img].get('current_tier', 0) >= max_tier)
         
         # Count qualified images that could exceed bounds
         qualified_for_bounds = 0
-        for image_name, stats in self.image_stats.items():
+        for img in available_images:
+            stats = self.image_stats[img]
             votes = stats.get('votes', 0)
             if votes >= self.tier_bounds_min_votes:
                 # Quick confidence check
@@ -214,7 +286,8 @@ class DataManager:
             'images_at_min_bound': at_min_bound,
             'images_at_max_bound': at_max_bound,
             'qualified_for_bounds': qualified_for_bounds,
-            'total_images': len(self.image_stats)
+            'total_available_images': len(available_images),
+            'total_binned_images': len(self.binned_images)
         }
     
     def export_tier_bounds_settings(self) -> Dict[str, Any]:
@@ -226,6 +299,16 @@ class DataManager:
                 'min_confidence': self.tier_bounds_min_confidence,
                 'min_votes': self.tier_bounds_min_votes,
                 'adaptive': self.tier_bounds_adaptive
+            }
+        }
+    
+    def export_binning_data(self) -> Dict[str, Any]:
+        """Export binning data for save file."""
+        return {
+            'binning_data': {
+                'binned_images': list(self.binned_images),
+                'binning_enabled': True,  # Feature flag for future compatibility
+                'binning_version': '1.0'
             }
         }
     
@@ -246,6 +329,16 @@ class DataManager:
             self.tier_bounds_min_votes = 10
             self.tier_bounds_adaptive = True
     
+    def load_binning_data(self, data: Dict[str, Any]) -> None:
+        """Load binning data from saved data."""
+        if 'binning_data' in data:
+            binning_data = data['binning_data']
+            binned_list = binning_data.get('binned_images', [])
+            self.binned_images = set(binned_list)
+            print(f"Loaded {len(self.binned_images)} binned images")
+        else:
+            self.binned_images = set()
+    
     def save_to_file(self, filename: str) -> bool:
         """Save all ranking data to a JSON file."""
         try:
@@ -255,7 +348,7 @@ class DataManager:
                 'image_stats': self.image_stats,
                 'metadata_cache': self.metadata_cache,
                 'timestamp': datetime.now().isoformat(),
-                'version': '2.1'  # Updated version for tier bounds
+                'version': '2.2'  # Updated version for binning support
             }
             
             # Export weight manager data (for backward compatibility)
@@ -266,6 +359,9 @@ class DataManager:
             
             # Export tier bounds settings
             data.update(self.export_tier_bounds_settings())
+            
+            # Export binning data
+            data.update(self.export_binning_data())
             
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -305,6 +401,9 @@ class DataManager:
             # Load tier bounds settings
             self.load_tier_bounds_settings(data)
             
+            # Load binning data
+            self.load_binning_data(data)
+            
             # Validate and fix vote count inconsistencies
             self._validate_and_fix_vote_counts()
             
@@ -323,7 +422,7 @@ class DataManager:
         except Exception as e:
             return False, f"Error loading data: {e}"
     
-    # ... (rest of the existing methods remain the same)
+    # ... (rest of the existing methods remain the same, but I'll include some key ones for completeness)
     
     def get_left_weights(self) -> Dict[str, float]:
         return self.weight_manager.get_left_weights()
@@ -371,7 +470,9 @@ class DataManager:
                 'last_voted': strategic_last_voted,
                 'matchup_history': [],
                 'prompt': None,
-                'display_metadata': None
+                'display_metadata': None,
+                'binned': False,  # Track binned status in stats for convenience
+                'notes': []  # For tracking binning/unbinning history
             }
         else:
             # Ensure required fields exist
@@ -384,7 +485,9 @@ class DataManager:
                 'last_voted': -1,
                 'matchup_history': [],
                 'prompt': None,
-                'display_metadata': None
+                'display_metadata': None,
+                'binned': False,
+                'notes': []
             }
             
             for field, default_value in required_fields.items():
@@ -416,33 +519,43 @@ class DataManager:
         return self.image_stats.get(image_filename, {})
     
     def get_tier_distribution(self) -> Dict[int, int]:
-        """Get the distribution of images across tiers."""
+        """Get the distribution of images across tiers (excluding binned images)."""
         tier_counts = defaultdict(int)
-        for stats in self.image_stats.values():
+        available_images = self.get_available_images()  # Exclude binned images
+        
+        for img in available_images:
+            stats = self.image_stats[img]
             tier_counts[stats['current_tier']] += 1
+        
         return dict(tier_counts)
     
     def get_overall_statistics(self) -> Dict[str, Any]:
         """Calculate overall statistics for the ranking system."""
-        if not self.image_stats:
+        available_images = self.get_available_images()
+        
+        if not available_images:
             return {
                 'total_images': 0,
                 'total_votes': 0,
                 'avg_votes_per_image': 0,
                 'tier_distribution': {},
-                'tier_bounds_info': self.get_tier_bounds_info()
+                'tier_bounds_info': self.get_tier_bounds_info(),
+                'binned_images': len(self.binned_images),
+                'total_all_images': len(self.image_stats)
             }
         
-        total_images = len(self.image_stats)
+        total_available_images = len(available_images)
         total_votes = self.vote_count
-        avg_votes_per_image = sum(s['votes'] for s in self.image_stats.values()) / total_images
+        avg_votes_per_image = sum(self.image_stats[img]['votes'] for img in available_images) / total_available_images
         
         return {
-            'total_images': total_images,
+            'total_images': total_available_images,
             'total_votes': total_votes,
             'avg_votes_per_image': avg_votes_per_image,
             'tier_distribution': self.get_tier_distribution(),
-            'tier_bounds_info': self.get_tier_bounds_info()
+            'tier_bounds_info': self.get_tier_bounds_info(),
+            'binned_images': len(self.binned_images),
+            'total_all_images': len(self.image_stats)
         }
     
     def export_algorithm_settings(self) -> Dict[str, Any]:
@@ -455,7 +568,7 @@ class DataManager:
                 'overflow_threshold': getattr(self, 'overflow_threshold', 1.0),
                 'min_overflow_images': getattr(self, 'min_overflow_images', 2),
                 'min_votes_for_stability': getattr(self, 'min_votes_for_stability', 6),
-                'algorithm_version': '2.1'
+                'algorithm_version': '2.2'  # Updated for binning support
             }
         }
     
@@ -470,7 +583,7 @@ class DataManager:
             self.min_overflow_images = settings.get('min_overflow_images', 2)
             self.min_votes_for_stability = settings.get('min_votes_for_stability', 6)
             
-            print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.1')}")
+            print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.2')}")
         else:
             # Set defaults
             self.tier_distribution_std = 1.5

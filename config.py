@@ -1,4 +1,4 @@
-"""Configuration constants for the Image Ranking System."""
+"""Configuration constants for the Image Ranking System with binning support."""
 
 class Colors:
     """Color constants for the dark theme interface."""
@@ -77,10 +77,15 @@ class Defaults:
         'prompt', 'negative', 'steps', 'cfg', 'sampler', 
         'model', 'seed', 'denoising', 'clip skip'
     ]
+    
+    # Binning configuration
+    BIN_FOLDER_NAME = 'Bin'
+    BINNED_TIER = -999  # Very low tier for binned images
+    BINNED_CONFIDENCE = 1.0  # High confidence to avoid selection
 
 
 class KeyBindings:
-    """Keyboard shortcut definitions."""
+    """Keyboard shortcut definitions including binning shortcuts."""
     VOTE_LEFT = ['<Left>', '<a>']
     VOTE_RIGHT = ['<Right>', '<d>']
     SAVE = ['<Control-s>']
@@ -88,3 +93,9 @@ class KeyBindings:
     STATS = ['<Control-t>']
     PROMPT_ANALYSIS = ['<Control-p>']
     SETTINGS = ['<Control-comma>']
+    
+    # Binning shortcuts
+    BIN_LEFT = ['<Control-1>']
+    BIN_RIGHT = ['<Control-2>']  
+    BIN_BOTH = ['<Control-3>']
+    BIN_MANAGEMENT = ['<Control-b>']
