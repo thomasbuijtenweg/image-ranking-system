@@ -1,5 +1,5 @@
 """
-UI Components package for the Image Ranking System with binning support.
+UI Components package for the Image Ranking System.
 
 This package contains specialized UI components that were extracted from
 the main window to improve maintainability and separation of concerns.
@@ -15,8 +15,6 @@ from .chart_generator import ChartGenerator
 from .data_exporter import DataExporter
 from .prompt_analyzer_ui import PromptAnalyzerUI
 from .stats_table import StatsTable
-from .binning_controller import BinningController
-from .binning_ui_controller import BinningUIController
 
 __all__ = [
     'ImageDisplayController',
@@ -28,7 +26,5 @@ __all__ = [
     'ChartGenerator',
     'DataExporter',
     'PromptAnalyzerUI',
-    'StatsTable',
-    'BinningController',
-    'BinningUIController'
+    'StatsTable'
 ]

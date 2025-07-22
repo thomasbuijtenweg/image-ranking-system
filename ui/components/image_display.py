@@ -1,8 +1,8 @@
 """
-Image display controller with binning support for the Image Ranking System.
+Image display controller for the Image Ranking System.
 
 This module handles all image display logic, including loading, resizing,
-updating image information in the UI, and showing binning status.
+and updating image information in the UI.
 """
 
 import tkinter as tk
@@ -15,10 +15,10 @@ from config import Colors, Defaults
 
 class ImageDisplayController:
     """
-    Handles image display and management for the main voting interface with binning support.
+    Handles image display and management for the main voting interface.
     
     This controller manages the left and right image display areas,
-    including image loading, resizing, metadata display, and binning status.
+    including image loading, resizing, and metadata display.
     """
     
     def __init__(self, parent: tk.Tk, data_manager, image_processor, prompt_analyzer):
@@ -83,13 +83,12 @@ class ImageDisplayController:
         frame = tk.Frame(parent, relief=tk.RAISED, borderwidth=2, bg=Colors.BG_SECONDARY)
         frame.grid(row=0, column=column, sticky="nsew", padx=5)
         
-        # Configure frame grid - text areas have fixed minimum sizes, space for bin button
+        # Configure frame grid - text areas have fixed minimum sizes
         frame.grid_columnconfigure(0, weight=1)
-        frame.grid_rowconfigure(0, weight=1, minsize=350)     # Image - expandable with minimum
+        frame.grid_rowconfigure(0, weight=1, minsize=400)     # Image - expandable with minimum
         frame.grid_rowconfigure(1, weight=0, minsize=30)     # Info - fixed minimum
         frame.grid_rowconfigure(2, weight=0, minsize=60)     # Metadata - fixed minimum
         frame.grid_rowconfigure(3, weight=0, minsize=60)     # Vote button - fixed minimum
-        frame.grid_rowconfigure(4, weight=0, minsize=40)     # Bin button - fixed minimum
         
         # Image display label - expandable, takes most space
         image_label = tk.Label(frame, text="No image", 
@@ -159,11 +158,6 @@ class ImageDisplayController:
         try:
             img_path = os.path.join(self.data_manager.image_folder, filename)
             
-            # Check if image is binned (shouldn't happen in voting, but let's be safe)
-            is_binned = self.data_manager.is_image_binned(filename)
-            if is_binned:
-                print(f"Warning: Displaying binned image {filename}")
-            
             # Force window to update and get actual dimensions
             self.parent.update_idletasks()
             
@@ -210,14 +204,13 @@ class ImageDisplayController:
     
     def update_image_info(self, filename: str, side: str) -> None:
         """
-        Update the info and metadata labels for an image with binning status.
+        Update the info and metadata labels for an image.
         
         Args:
             filename: Name of the image file
             side: Which side to update ('left' or 'right')
         """
         stats = self.data_manager.get_image_stats(filename)
-        is_binned = self.data_manager.is_image_binned(filename)
         
         # Calculate individual stability (requires ranking algorithm)
         stability = 0.0
@@ -226,22 +219,13 @@ class ImageDisplayController:
             stability = self.ranking_algorithm._calculate_tier_stability(filename)
             confidence = self.ranking_algorithm._calculate_image_confidence(filename)
         
-        # Create info text with binning status and selection method indication
-        binning_status = " 🗑️ BINNED" if is_binned else ""
+        # Create info text with selection method indication
         selection_indicator = "(Low confidence)" if side == 'left' else "(High confidence, low recency)"
-        
-        if is_binned:
-            # For binned images, show different info
-            info_text = (f"🗑️ BINNED | "
-                        f"Final Tier: {stats.get('current_tier', 0)} | "
-                        f"Total Wins: {stats.get('wins', 0)} | "
-                        f"Total Losses: {stats.get('losses', 0)}{binning_status}")
-        else:
-            info_text = (f"Tier: {stats.get('current_tier', 0)} | "
-                        f"Wins: {stats.get('wins', 0)} | "
-                        f"Losses: {stats.get('losses', 0)} | "
-                        f"Stability: {stability:.2f} | "
-                        f"Confidence: {confidence:.2f} {selection_indicator}{binning_status}")
+        info_text = (f"Tier: {stats.get('current_tier', 0)} | "
+                    f"Wins: {stats.get('wins', 0)} | "
+                    f"Losses: {stats.get('losses', 0)} | "
+                    f"Stability: {stability:.2f} | "
+                    f"Confidence: {confidence:.2f} {selection_indicator}")
         
         # Get prompt with lazy loading
         prompt = stats.get('prompt')
@@ -257,7 +241,7 @@ class ImageDisplayController:
                 print(f"Error extracting metadata from {filename}: {e}")
                 prompt = None
         
-        # Format prompt text with binning info
+        # Format prompt text
         if prompt:
             # Extract only the main/positive prompt using the prompt analyzer
             main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
@@ -268,61 +252,38 @@ class ImageDisplayController:
         else:
             prompt_text = "Prompt: No prompt found"
         
-        # Add binning note to prompt if binned
-        if is_binned:
-            binned_vote_count = stats.get('binned_vote_count')
-            if binned_vote_count:
-                prompt_text += f" | Binned at vote {binned_vote_count}"
-            else:
-                prompt_text += " | Binned"
-        
-        # Update labels with dynamic wraplength and binning styling
+        # Update labels with dynamic wraplength
         if side == 'left':
-            # Change color for binned images
-            if is_binned:
-                self.left_info_label.config(text=info_text, fg=Colors.TEXT_ERROR)
-            else:
-                self.left_info_label.config(text=info_text, fg=Colors.TEXT_PRIMARY)
-            self._update_metadata_label(self.left_metadata_label, prompt_text, is_binned)
+            self.left_info_label.config(text=info_text)
+            self._update_metadata_label(self.left_metadata_label, prompt_text)
         else:
-            if is_binned:
-                self.right_info_label.config(text=info_text, fg=Colors.TEXT_ERROR)
-            else:
-                self.right_info_label.config(text=info_text, fg=Colors.TEXT_PRIMARY)
-            self._update_metadata_label(self.right_metadata_label, prompt_text, is_binned)
+            self.right_info_label.config(text=info_text)
+            self._update_metadata_label(self.right_metadata_label, prompt_text)
     
-    def _update_metadata_label(self, label: tk.Label, text: str, is_binned: bool = False) -> None:
-        """Update a metadata label with proper text wrapping and binning styling."""
+    def _update_metadata_label(self, label: tk.Label, text: str) -> None:
+        """Update a metadata label with proper text wrapping."""
         try:
             self.parent.update_idletasks()
             frame_width = label.winfo_width()
-            wrap_length = max(frame_width - 20, 300) if frame_width > 100 else 400
-            
-            # Change color for binned images
-            color = Colors.TEXT_ERROR if is_binned else Colors.TEXT_SECONDARY
-            
-            label.config(text=text, wraplength=wrap_length, fg=color)
+            if frame_width > 100:  # Only update if frame has been rendered
+                label.config(text=text, wraplength=max(frame_width - 20, 300))
+            else:
+                label.config(text=text, wraplength=400)
         except:
-            color = Colors.TEXT_ERROR if is_binned else Colors.TEXT_SECONDARY
-            label.config(text=text, wraplength=400, fg=color)
+            label.config(text=text, wraplength=400)
     
     def _handle_image_load_error(self, filename: str, side: str) -> None:
         """Handle image loading errors by updating UI appropriately."""
-        is_binned = self.data_manager.is_image_binned(filename)
-        error_text = "Error loading image"
-        if is_binned:
-            error_text = "🗑️ Binned image - Error loading"
-        
         if side == 'left':
-            self.left_image_label.config(image="", text=error_text)
+            self.left_image_label.config(image="", text="Error loading image")
             self.current_images['left'] = None
         else:
-            self.right_image_label.config(image="", text=error_text)
+            self.right_image_label.config(image="", text="Error loading image")
             self.current_images['right'] = None
     
     def preload_images(self, img1: str, img2: str) -> None:
         """
-        Preload images for better performance (skip binned images).
+        Preload images for better performance.
         
         Args:
             img1: First image filename
@@ -330,11 +291,6 @@ class ImageDisplayController:
         """
         # Clear old preloaded images
         self.next_pair_images = {'left': None, 'right': None}
-        
-        # Skip preloading if either image is binned
-        if self.data_manager.is_image_binned(img1) or self.data_manager.is_image_binned(img2):
-            print(f"Skipping preload of binned images: {img1}, {img2}")
-            return
         
         try:
             # Calculate display dimensions
@@ -390,31 +346,12 @@ class ImageDisplayController:
         if self.right_image_label:
             self.right_image_label.config(image="", text="No image")
         
-        # Reset label colors
-        if self.left_info_label:
-            self.left_info_label.config(fg=Colors.TEXT_PRIMARY)
-        if self.right_info_label:
-            self.right_info_label.config(fg=Colors.TEXT_PRIMARY)
-        if self.left_metadata_label:
-            self.left_metadata_label.config(fg=Colors.TEXT_SECONDARY)
-        if self.right_metadata_label:
-            self.right_metadata_label.config(fg=Colors.TEXT_SECONDARY)
-        
         # Force garbage collection
         gc.collect()
     
     def set_ranking_algorithm(self, ranking_algorithm) -> None:
         """Set the ranking algorithm reference for stability calculations."""
         self.ranking_algorithm = ranking_algorithm
-    
-    def get_display_status(self) -> Dict[str, Any]:
-        """Get current display status including binning info."""
-        return {
-            'has_left_image': self.current_images['left'] is not None,
-            'has_right_image': self.current_images['right'] is not None,
-            'preloaded_left': self.next_pair_images['left'] is not None,
-            'preloaded_right': self.next_pair_images['right'] is not None
-        }
     
     def cleanup(self) -> None:
         """Clean up resources."""
