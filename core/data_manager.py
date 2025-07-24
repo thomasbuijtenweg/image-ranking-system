@@ -1,14 +1,14 @@
 """Enhanced Data Manager with intelligent tier bounds."""
 
-import json
 import os
-from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 from collections import defaultdict
 
 from config import Defaults
 from core.weight_manager import WeightManager
 from core.tier_bounds_manager import TierBoundsManager
+from core.data_persistence import DataPersistence
+from core.algorithm_settings import AlgorithmSettings
 
 
 class DataManager:
@@ -17,6 +17,8 @@ class DataManager:
     def __init__(self):
         self.weight_manager = WeightManager()
         self.tier_bounds_manager = TierBoundsManager()
+        self.data_persistence = DataPersistence()
+        self.algorithm_settings = AlgorithmSettings()
         self.reset_data()
     
     def reset_data(self):
@@ -27,16 +29,9 @@ class DataManager:
         self.metadata_cache = {}
         self.weight_manager.reset_to_defaults()
         self.tier_bounds_manager.reset_to_defaults()
+        self.algorithm_settings.reset_to_defaults()
         self._last_calculated_rankings = None
         self._last_calculation_vote_count = -1
-        
-        # Initialize algorithm settings
-        self.tier_distribution_std = 1.5
-        self.confidence_vote_scale = 20.0
-        self.confidence_balance = 0.5
-        self.overflow_threshold = 1.0
-        self.min_overflow_images = 2
-        self.min_votes_for_stability = 6
     
     def record_vote(self, winner: str, loser: str) -> None:
         """Record a vote between two images with tier bounds checking."""
@@ -91,80 +86,107 @@ class DataManager:
     
     def save_to_file(self, filename: str) -> bool:
         """Save all ranking data to a JSON file."""
-        try:
-            data = {
-                'image_folder': self.image_folder,
-                'vote_count': self.vote_count,
-                'image_stats': self.image_stats,
-                'metadata_cache': self.metadata_cache,
-                'timestamp': datetime.now().isoformat(),
-                'version': '2.1'  # Updated version for tier bounds
-            }
-            
-            # Export weight manager data
-            data.update(self.weight_manager.export_to_data())
-            
-            # Export algorithm settings
-            data.update(self.export_algorithm_settings())
-            
-            # Export tier bounds settings
-            data.update(self.tier_bounds_manager.export_settings())
-            
-            with open(filename, 'w', encoding='utf-8') as f:
-                json.dump(data, f, indent=2, ensure_ascii=False)
-            
-            return True
-            
-        except Exception as e:
-            print(f"Error saving data: {e}")
-            return False
+        # Prepare core data
+        core_data = {
+            'image_folder': self.image_folder,
+            'vote_count': self.vote_count,
+            'image_stats': self.image_stats,
+            'metadata_cache': self.metadata_cache
+        }
+        
+        # Gather all settings
+        weight_data = self.weight_manager.export_to_data()
+        algorithm_settings = self.algorithm_settings.export_settings()
+        tier_bounds_settings = self.tier_bounds_manager.export_settings()
+        
+        # Prepare complete save data
+        save_data = self.data_persistence.prepare_save_data(
+            core_data, weight_data, algorithm_settings, tier_bounds_settings)
+        
+        # Save to file
+        return self.data_persistence.save_to_file(filename, save_data)
     
     def load_from_file(self, filename: str) -> Tuple[bool, str]:
         """Load ranking data from a JSON file."""
-        try:
-            with open(filename, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            
-            required_fields = ['image_folder', 'vote_count', 'image_stats']
-            for field in required_fields:
-                if field not in data:
-                    return False, f"Missing required field: {field}"
-            
-            self.image_folder = data['image_folder']
-            self.vote_count = data['vote_count']
-            self.image_stats = data['image_stats']
-            
-            if 'metadata_cache' in data:
-                self.metadata_cache = data['metadata_cache']
-            else:
-                self.metadata_cache = {}
-            
-            # Load weight manager data
-            self.weight_manager.load_from_data(data)
-            
-            # Load algorithm settings
-            self.load_algorithm_settings(data)
-            
-            # Load tier bounds settings
-            self.tier_bounds_manager.load_settings(data)
-            
-            # Validate and fix vote count inconsistencies
-            self._validate_and_fix_vote_counts()
-            
-            # Update existing images with strategic timing
-            self._update_existing_images_with_strategic_timing()
-            
-            for image_filename in self.image_stats:
-                self.initialize_image_stats(image_filename)
-            
-            self._last_calculated_rankings = None
-            
-            return True, ""
-            
-        except json.JSONDecodeError as e:
-            return False, f"Invalid JSON format: {e}"
-        except Exception as e:
-            return False, f"Error loading data: {e}"
+        # Load data from file
+        success, data, error_msg = self.data_persistence.load_from_file(filename)
+        if not success:
+            return False, error_msg
+        
+        # Validate and fix data
+        data = self.data_persistence.validate_and_fix_data(data)
+        
+        # Extract core data
+        core_data = self.data_persistence.extract_core_data(data)
+        self.image_folder = core_data['image_folder']
+        self.vote_count = core_data['vote_count']
+        self.image_stats = core_data['image_stats']
+        self.metadata_cache = core_data['metadata_cache']
+        
+        # Load other settings
+        self.weight_manager.load_from_data(data)
+        self.algorithm_settings.load_settings(data)
+        self.tier_bounds_manager.load_settings(data)
+        
+        # Update existing images with strategic timing
+        self._update_existing_images_with_strategic_timing()
+        
+        # Initialize all image stats
+        for image_filename in self.image_stats:
+            self.initialize_image_stats(image_filename)
+        
+        self._last_calculated_rankings = None
+        
+        return True, ""
+    
+    # Algorithm settings property accessors for backward compatibility
+    @property
+    def tier_distribution_std(self):
+        return self.algorithm_settings.tier_distribution_std
+    
+    @tier_distribution_std.setter
+    def tier_distribution_std(self, value):
+        self.algorithm_settings.set_value('tier_distribution_std', value)
+    
+    @property
+    def confidence_vote_scale(self):
+        return self.algorithm_settings.confidence_vote_scale
+    
+    @confidence_vote_scale.setter
+    def confidence_vote_scale(self, value):
+        self.algorithm_settings.set_value('confidence_vote_scale', value)
+    
+    @property
+    def confidence_balance(self):
+        return self.algorithm_settings.confidence_balance
+    
+    @confidence_balance.setter
+    def confidence_balance(self, value):
+        self.algorithm_settings.set_value('confidence_balance', value)
+    
+    @property
+    def overflow_threshold(self):
+        return self.algorithm_settings.overflow_threshold
+    
+    @overflow_threshold.setter
+    def overflow_threshold(self, value):
+        self.algorithm_settings.set_value('overflow_threshold', value)
+    
+    @property
+    def min_overflow_images(self):
+        return self.algorithm_settings.min_overflow_images
+    
+    @min_overflow_images.setter
+    def min_overflow_images(self, value):
+        self.algorithm_settings.set_value('min_overflow_images', value)
+    
+    @property
+    def min_votes_for_stability(self):
+        return self.algorithm_settings.min_votes_for_stability
+    
+    @min_votes_for_stability.setter
+    def min_votes_for_stability(self, value):
+        self.algorithm_settings.set_value('min_votes_for_stability', value)
     
     # Tier bounds property accessors
     @property
@@ -235,14 +257,6 @@ class DataManager:
     
     def set_right_priority_preferences(self, preferences: Dict[str, bool]) -> None:
         self.weight_manager.set_right_priority_preferences(preferences)
-    
-    @property
-    def tier_distribution_std(self) -> float:
-        return getattr(self, '_tier_distribution_std', 1.5)
-    
-    @tier_distribution_std.setter
-    def tier_distribution_std(self, value: float) -> None:
-        self._tier_distribution_std = value
     
     def initialize_image_stats(self, image_filename: str) -> None:
         """Initialize stats for a new image with strategic placement."""
@@ -331,60 +345,6 @@ class DataManager:
             'tier_distribution': self.get_tier_distribution(),
             'tier_bounds_info': self.get_tier_bounds_info()
         }
-    
-    def export_algorithm_settings(self) -> Dict[str, Any]:
-        """Export current algorithm settings to a dictionary."""
-        return {
-            'algorithm_settings': {
-                'tier_distribution_std': getattr(self, '_tier_distribution_std', 1.5),
-                'confidence_vote_scale': getattr(self, 'confidence_vote_scale', 20.0),
-                'confidence_balance': getattr(self, 'confidence_balance', 0.5),
-                'overflow_threshold': getattr(self, 'overflow_threshold', 1.0),
-                'min_overflow_images': getattr(self, 'min_overflow_images', 2),
-                'min_votes_for_stability': getattr(self, 'min_votes_for_stability', 6),
-                'algorithm_version': '2.1'
-            }
-        }
-    
-    def load_algorithm_settings(self, data: Dict[str, Any]) -> None:
-        """Load algorithm settings from loaded data."""
-        if 'algorithm_settings' in data:
-            settings = data['algorithm_settings']
-            self.tier_distribution_std = settings.get('tier_distribution_std', 1.5)
-            self.confidence_vote_scale = settings.get('confidence_vote_scale', 20.0)
-            self.confidence_balance = settings.get('confidence_balance', 0.5)
-            self.overflow_threshold = settings.get('overflow_threshold', 1.0)
-            self.min_overflow_images = settings.get('min_overflow_images', 2)
-            self.min_votes_for_stability = settings.get('min_votes_for_stability', 6)
-            
-            print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.1')}")
-        else:
-            # Set defaults
-            self.tier_distribution_std = 1.5
-            self.confidence_vote_scale = 20.0
-            self.confidence_balance = 0.5
-            self.overflow_threshold = 1.0
-            self.min_overflow_images = 2
-            self.min_votes_for_stability = 6
-    
-    def _validate_and_fix_vote_counts(self) -> None:
-        """Validate and fix vote count inconsistencies from legacy data."""
-        if not self.image_stats:
-            return
-        
-        fixed_count = 0
-        for image_filename, stats in self.image_stats.items():
-            wins = stats.get('wins', 0)
-            losses = stats.get('losses', 0)
-            votes = stats.get('votes', 0)
-            expected_votes = wins + losses
-            
-            if votes != expected_votes:
-                stats['votes'] = expected_votes
-                fixed_count += 1
-        
-        if fixed_count > 0:
-            print(f"Corrected vote count inconsistencies for {fixed_count} images")
     
     def _update_existing_images_with_strategic_timing(self) -> None:
         """Update existing images that have never been voted on to use strategic timing."""
