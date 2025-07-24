@@ -2,14 +2,13 @@
 
 import json
 import os
-import math
-import statistics
 from datetime import datetime
 from typing import Dict, Any, Optional, Tuple
 from collections import defaultdict
 
 from config import Defaults
 from core.weight_manager import WeightManager
+from core.tier_bounds_manager import TierBoundsManager
 
 
 class DataManager:
@@ -17,6 +16,7 @@ class DataManager:
     
     def __init__(self):
         self.weight_manager = WeightManager()
+        self.tier_bounds_manager = TierBoundsManager()
         self.reset_data()
     
     def reset_data(self):
@@ -26,6 +26,7 @@ class DataManager:
         self.image_stats = {}
         self.metadata_cache = {}
         self.weight_manager.reset_to_defaults()
+        self.tier_bounds_manager.reset_to_defaults()
         self._last_calculated_rankings = None
         self._last_calculation_vote_count = -1
         
@@ -36,97 +37,6 @@ class DataManager:
         self.overflow_threshold = 1.0
         self.min_overflow_images = 2
         self.min_votes_for_stability = 6
-        
-        # New tier bounds settings
-        self.tier_bounds_enabled = True
-        self.tier_bounds_std_multiplier = 3.0  # 3 standard deviations = 99.7% of images
-        self.tier_bounds_min_confidence = 0.8  # Minimum confidence to exceed bounds
-        self.tier_bounds_min_votes = 10  # Minimum votes to exceed bounds
-        self.tier_bounds_adaptive = True  # Allow bounds to grow with collection
-    
-    def calculate_tier_bounds(self) -> Tuple[int, int]:
-        """
-        Calculate the current tier bounds based on standard deviation and collection size.
-        
-        Returns:
-            Tuple of (min_tier, max_tier)
-        """
-        if not self.tier_bounds_enabled:
-            return float('-inf'), float('inf')
-        
-        # Base bounds on standard deviation
-        base_bound = int(self.tier_distribution_std * self.tier_bounds_std_multiplier)
-        
-        if self.tier_bounds_adaptive:
-            # Adaptive bounds grow with collection size
-            total_images = len(self.image_stats)
-            
-            # Allow more tiers for larger collections
-            # log scaling: 100 images = +0 tiers, 1000 images = +1 tier, 10000 images = +2 tiers
-            adaptive_bonus = int(math.log10(max(total_images, 10)) - 2) if total_images > 100 else 0
-            
-            # Also consider current tier distribution
-            if self.image_stats:
-                current_tiers = [stats.get('current_tier', 0) for stats in self.image_stats.values()]
-                current_min = min(current_tiers)
-                current_max = max(current_tiers)
-                
-                # Allow expansion by 1 tier beyond current bounds
-                expansion_min = min(current_min - 1, -base_bound - adaptive_bonus)
-                expansion_max = max(current_max + 1, base_bound + adaptive_bonus)
-                
-                return expansion_min, expansion_max
-            else:
-                return -base_bound - adaptive_bonus, base_bound + adaptive_bonus
-        else:
-            # Fixed bounds
-            return -base_bound, base_bound
-    
-    def can_move_to_tier(self, image_name: str, target_tier: int) -> Tuple[bool, str]:
-        """
-        Check if an image can move to the target tier.
-        
-        Args:
-            image_name: Name of the image
-            target_tier: Tier the image wants to move to
-            
-        Returns:
-            Tuple of (can_move, reason)
-        """
-        if not self.tier_bounds_enabled:
-            return True, "Tier bounds disabled"
-        
-        min_tier, max_tier = self.calculate_tier_bounds()
-        
-        # Check if target tier is within bounds
-        if min_tier <= target_tier <= max_tier:
-            return True, "Within bounds"
-        
-        # If outside bounds, check if image qualifies to exceed bounds
-        stats = self.image_stats.get(image_name, {})
-        votes = stats.get('votes', 0)
-        
-        # Calculate confidence (simplified version of the confidence calculator)
-        if votes == 0:
-            confidence = 0.0
-        else:
-            tier_history = stats.get('tier_history', [0])
-            if len(tier_history) <= 1:
-                stability = 0.0
-            else:
-                stability = statistics.stdev(tier_history)
-            
-            effective_stability = stability / math.sqrt(votes)
-            confidence = 1.0 / (1.0 + effective_stability)
-        
-        # Check qualification criteria
-        if (confidence >= self.tier_bounds_min_confidence and 
-            votes >= self.tier_bounds_min_votes):
-            return True, f"High confidence ({confidence:.3f}) and sufficient votes ({votes})"
-        
-        # Not qualified to exceed bounds
-        reason = f"Insufficient qualification: confidence={confidence:.3f} (need {self.tier_bounds_min_confidence}), votes={votes} (need {self.tier_bounds_min_votes})"
-        return False, reason
     
     def record_vote(self, winner: str, loser: str) -> None:
         """Record a vote between two images with tier bounds checking."""
@@ -140,8 +50,10 @@ class DataManager:
         loser_target_tier = loser_current_tier - 1
         
         # Check if moves are allowed
-        winner_can_move, winner_reason = self.can_move_to_tier(winner, winner_target_tier)
-        loser_can_move, loser_reason = self.can_move_to_tier(loser, loser_target_tier)
+        winner_can_move, winner_reason = self.tier_bounds_manager.can_move_to_tier(
+            winner, winner_target_tier, self.image_stats, self.tier_distribution_std)
+        loser_can_move, loser_reason = self.tier_bounds_manager.can_move_to_tier(
+            loser, loser_target_tier, self.image_stats, self.tier_distribution_std)
         
         # Update winner stats
         winner_stats = self.image_stats[winner]
@@ -177,75 +89,6 @@ class DataManager:
         
         self._last_calculated_rankings = None
     
-    def get_tier_bounds_info(self) -> Dict[str, Any]:
-        """Get information about current tier bounds."""
-        if not self.tier_bounds_enabled:
-            return {'enabled': False}
-        
-        min_tier, max_tier = self.calculate_tier_bounds()
-        
-        # Count images at bounds
-        at_min_bound = sum(1 for stats in self.image_stats.values() 
-                          if stats.get('current_tier', 0) <= min_tier)
-        at_max_bound = sum(1 for stats in self.image_stats.values() 
-                          if stats.get('current_tier', 0) >= max_tier)
-        
-        # Count qualified images that could exceed bounds
-        qualified_for_bounds = 0
-        for image_name, stats in self.image_stats.items():
-            votes = stats.get('votes', 0)
-            if votes >= self.tier_bounds_min_votes:
-                # Quick confidence check
-                tier_history = stats.get('tier_history', [0])
-                if len(tier_history) > 1:
-                    stability = statistics.stdev(tier_history)
-                    confidence = 1.0 / (1.0 + stability / math.sqrt(votes))
-                    if confidence >= self.tier_bounds_min_confidence:
-                        qualified_for_bounds += 1
-        
-        return {
-            'enabled': True,
-            'min_tier': min_tier,
-            'max_tier': max_tier,
-            'std_multiplier': self.tier_bounds_std_multiplier,
-            'min_confidence': self.tier_bounds_min_confidence,
-            'min_votes': self.tier_bounds_min_votes,
-            'adaptive': self.tier_bounds_adaptive,
-            'images_at_min_bound': at_min_bound,
-            'images_at_max_bound': at_max_bound,
-            'qualified_for_bounds': qualified_for_bounds,
-            'total_images': len(self.image_stats)
-        }
-    
-    def export_tier_bounds_settings(self) -> Dict[str, Any]:
-        """Export tier bounds settings."""
-        return {
-            'tier_bounds_settings': {
-                'enabled': self.tier_bounds_enabled,
-                'std_multiplier': self.tier_bounds_std_multiplier,
-                'min_confidence': self.tier_bounds_min_confidence,
-                'min_votes': self.tier_bounds_min_votes,
-                'adaptive': self.tier_bounds_adaptive
-            }
-        }
-    
-    def load_tier_bounds_settings(self, data: Dict[str, Any]) -> None:
-        """Load tier bounds settings from saved data."""
-        if 'tier_bounds_settings' in data:
-            settings = data['tier_bounds_settings']
-            self.tier_bounds_enabled = settings.get('enabled', True)
-            self.tier_bounds_std_multiplier = settings.get('std_multiplier', 3.0)
-            self.tier_bounds_min_confidence = settings.get('min_confidence', 0.8)
-            self.tier_bounds_min_votes = settings.get('min_votes', 10)
-            self.tier_bounds_adaptive = settings.get('adaptive', True)
-        else:
-            # Set defaults if no settings found
-            self.tier_bounds_enabled = True
-            self.tier_bounds_std_multiplier = 3.0
-            self.tier_bounds_min_confidence = 0.8
-            self.tier_bounds_min_votes = 10
-            self.tier_bounds_adaptive = True
-    
     def save_to_file(self, filename: str) -> bool:
         """Save all ranking data to a JSON file."""
         try:
@@ -258,14 +101,14 @@ class DataManager:
                 'version': '2.1'  # Updated version for tier bounds
             }
             
-            # Export weight manager data (for backward compatibility)
+            # Export weight manager data
             data.update(self.weight_manager.export_to_data())
             
             # Export algorithm settings
             data.update(self.export_algorithm_settings())
             
             # Export tier bounds settings
-            data.update(self.export_tier_bounds_settings())
+            data.update(self.tier_bounds_manager.export_settings())
             
             with open(filename, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
@@ -296,14 +139,14 @@ class DataManager:
             else:
                 self.metadata_cache = {}
             
-            # Load weight manager data (for backward compatibility)
+            # Load weight manager data
             self.weight_manager.load_from_data(data)
             
             # Load algorithm settings
             self.load_algorithm_settings(data)
             
             # Load tier bounds settings
-            self.load_tier_bounds_settings(data)
+            self.tier_bounds_manager.load_settings(data)
             
             # Validate and fix vote count inconsistencies
             self._validate_and_fix_vote_counts()
@@ -323,8 +166,52 @@ class DataManager:
         except Exception as e:
             return False, f"Error loading data: {e}"
     
-    # ... (rest of the existing methods remain the same)
+    # Tier bounds property accessors
+    @property
+    def tier_bounds_enabled(self):
+        return self.tier_bounds_manager.enabled
     
+    @tier_bounds_enabled.setter
+    def tier_bounds_enabled(self, value):
+        self.tier_bounds_manager.enabled = value
+    
+    @property
+    def tier_bounds_std_multiplier(self):
+        return self.tier_bounds_manager.std_multiplier
+    
+    @tier_bounds_std_multiplier.setter
+    def tier_bounds_std_multiplier(self, value):
+        self.tier_bounds_manager.std_multiplier = value
+    
+    @property
+    def tier_bounds_min_confidence(self):
+        return self.tier_bounds_manager.min_confidence
+    
+    @tier_bounds_min_confidence.setter
+    def tier_bounds_min_confidence(self, value):
+        self.tier_bounds_manager.min_confidence = value
+    
+    @property
+    def tier_bounds_min_votes(self):
+        return self.tier_bounds_manager.min_votes
+    
+    @tier_bounds_min_votes.setter
+    def tier_bounds_min_votes(self, value):
+        self.tier_bounds_manager.min_votes = value
+    
+    @property
+    def tier_bounds_adaptive(self):
+        return self.tier_bounds_manager.adaptive
+    
+    @tier_bounds_adaptive.setter
+    def tier_bounds_adaptive(self, value):
+        self.tier_bounds_manager.adaptive = value
+    
+    def get_tier_bounds_info(self) -> Dict[str, Any]:
+        """Get information about current tier bounds."""
+        return self.tier_bounds_manager.get_bounds_info(self.tier_distribution_std, self.image_stats)
+    
+    # Weight manager delegations
     def get_left_weights(self) -> Dict[str, float]:
         return self.weight_manager.get_left_weights()
     

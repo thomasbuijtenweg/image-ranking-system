@@ -7,6 +7,7 @@ from .prompt_analyzer import PromptAnalyzer
 from .metadata_extractor import MetadataExtractor
 from .weight_manager import WeightManager
 from .confidence_calculator import ConfidenceCalculator
+from .tier_bounds_manager import TierBoundsManager
 
-__all__ = ['DataManager', 'ImageProcessor', 'RankingAlgorithm', 'PromptAnalyzer', 'MetadataExtractor', 'WeightManager', 'ConfidenceCalculator']
+__all__ = ['DataManager', 'ImageProcessor', 'RankingAlgorithm', 'PromptAnalyzer', 'MetadataExtractor', 'WeightManager', 'ConfidenceCalculator', 'TierBoundsManager']
 __version__ = '1.0.0'
