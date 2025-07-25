@@ -10,15 +10,12 @@ from core.data_manager import DataManager
 from core.confidence_calculator import ConfidenceCalculator
 
 
-
 class RankingAlgorithm:
     """Implements intelligent pair selection based on tier overflow and image confidence."""
     
     def __init__(self, data_manager: DataManager):
         self.data_manager = data_manager
         self.confidence_calculator = ConfidenceCalculator(data_manager)
-        self._cached_rankings = None
-        self._last_calculation_vote_count = -1
     
     def select_next_pair(self, available_images: List[str], 
                         exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
@@ -233,50 +230,6 @@ class RankingAlgorithm:
         
         return statistics.stdev(tier_history)
     
-    def calculate_all_rankings(self) -> Dict[str, List[Tuple[str, Dict[str, Any]]]]:
-        """Calculate rankings for all metrics."""
-        current_vote_count = self.data_manager.vote_count
-        if (self._cached_rankings is not None and 
-            self._last_calculation_vote_count == current_vote_count):
-            return self._cached_rankings
-        
-        image_metrics = {}
-        for img, stats in self.data_manager.image_stats.items():
-            individual_stability = self._calculate_tier_stability(img)
-            
-            metrics = {
-                'filename': img,
-                'total_votes': stats.get('votes', 0),
-                'win_rate': (stats.get('wins', 0) / stats.get('votes', 1) 
-                           if stats.get('votes', 0) > 0 else 0),
-                'current_tier': stats.get('current_tier', 0),
-                'tier_stability': individual_stability,
-                'recency': (current_vote_count - stats.get('last_voted', -1) 
-                          if stats.get('last_voted', -1) >= 0 else float('inf')),
-                'confidence': self._calculate_image_confidence(img)
-            }
-            image_metrics[img] = metrics
-        
-        rankings = {
-            'total_votes': sorted(image_metrics.items(), 
-                                key=lambda x: x[1]['total_votes'], reverse=True),
-            'win_rate': sorted(image_metrics.items(), 
-                             key=lambda x: x[1]['win_rate'], reverse=True),
-            'current_tier': sorted(image_metrics.items(), 
-                                 key=lambda x: x[1]['current_tier'], reverse=True),
-            'tier_stability': sorted(image_metrics.items(), 
-                                   key=lambda x: x[1]['tier_stability']),
-            'recency': sorted(image_metrics.items(), 
-                            key=lambda x: x[1]['recency'], reverse=True),
-            'confidence': sorted(image_metrics.items(), 
-                               key=lambda x: x[1]['confidence'], reverse=True)
-        }
-        
-        self._cached_rankings = rankings
-        self._last_calculation_vote_count = current_vote_count
-        
-        return rankings
-    
     def get_selection_explanation(self, image1: str, image2: str) -> str:
         """Generate explanation of why this pair was selected."""
         stats1 = self.data_manager.get_image_stats(image1)
@@ -309,18 +262,3 @@ class RankingAlgorithm:
             explanation = f"Fallback selection: Left image from Tier {tier1}, Right image from Tier {tier2}"
         
         return explanation
-      
-    def invalidate_cache(self):
-        """Invalidate the cached rankings to force recalculation."""
-        self._cached_rankings = None
-        self._last_calculation_vote_count = -1
-    
-    def get_algorithm_summary(self) -> Dict[str, Any]:
-        """Get a summary of current algorithm settings."""
-        return {
-            'tier_distribution_std': getattr(self.data_manager, 'tier_distribution_std', 1.5),
-            'overflow_threshold': getattr(self.data_manager, 'overflow_threshold', 1.0),
-            'min_overflow_images': getattr(self.data_manager, 'min_overflow_images', 2),
-            'algorithm_type': 'tier_overflow_confidence_sqrt_pure',
-            'version': '2.2'
-        }
