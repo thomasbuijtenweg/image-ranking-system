@@ -137,7 +137,9 @@ class VotingController:
         loser = self.current_pair[1] if side == 'left' else self.current_pair[0]
         
         self.data_manager.record_vote(winner, loser)
-                   
+        
+        # Cache invalidation removed - it was never actually used
+        
         if self.stats_label:
             self.stats_label.config(text=f"Total votes: {self.data_manager.vote_count}")
         

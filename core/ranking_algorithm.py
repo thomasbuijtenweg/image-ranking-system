@@ -62,9 +62,9 @@ class RankingAlgorithm:
         total_images = len(available_images)
         overflowing_tiers = []
         
-        # Get overflow settings
-        overflow_threshold = getattr(self.data_manager, 'overflow_threshold', 1.0)
-        min_overflow_images = getattr(self.data_manager, 'min_overflow_images', 2)
+        # Get overflow settings from algorithm_settings
+        overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
+        min_overflow_images = self.data_manager.algorithm_settings.min_overflow_images
         
         for tier, actual_count in tier_counts.items():
             expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
@@ -93,7 +93,7 @@ class RankingAlgorithm:
         max_overflow = 0
         most_overflowing_tier = overflowing_tiers[0]
         
-        overflow_threshold = getattr(self.data_manager, 'overflow_threshold', 1.0)
+        overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
         
         for tier in overflowing_tiers:
             actual_count = tier_counts[tier]
@@ -208,7 +208,7 @@ class RankingAlgorithm:
     
     def _calculate_expected_tier_proportion(self, tier: int, total_images: int) -> float:
         """Calculate expected proportion of images in a tier based on normal distribution."""
-        std_dev = getattr(self.data_manager, 'tier_distribution_std', 1.5)
+        std_dev = self.data_manager.algorithm_settings.tier_distribution_std
         
         density = math.exp(-(tier ** 2) / (2 * std_dev ** 2))
         
@@ -239,7 +239,7 @@ class RankingAlgorithm:
         tier2 = stats2.get('current_tier', 0)
         
         # Get algorithm settings for explanation
-        overflow_threshold = getattr(self.data_manager, 'overflow_threshold', 1.0)
+        overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
         
         if tier1 == tier2:
             # Get detailed confidence breakdown

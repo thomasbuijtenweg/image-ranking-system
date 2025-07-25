@@ -33,35 +33,6 @@ class SettingsWindow:
         self.tier_bounds_min_votes_var = None
         self.tier_bounds_min_votes_label = None
         self.tier_bounds_adaptive_var = None
-        
-        # Initialize new settings
-        self._initialize_new_settings()
-    
-    def _initialize_new_settings(self):
-        """Initialize new settings with default values if they don't exist."""
-        # Ensure all tier bounds settings exist
-        if not hasattr(self.data_manager, 'tier_bounds_enabled'):
-            self.data_manager.tier_bounds_enabled = True
-            print("Initialized tier_bounds_enabled to True")
-        else:
-            print(f"Found existing tier_bounds_enabled: {self.data_manager.tier_bounds_enabled}")
-            
-        if not hasattr(self.data_manager, 'tier_bounds_std_multiplier'):
-            self.data_manager.tier_bounds_std_multiplier = 3.0
-        if not hasattr(self.data_manager, 'tier_bounds_min_confidence'):
-            self.data_manager.tier_bounds_min_confidence = 0.8
-        if not hasattr(self.data_manager, 'tier_bounds_min_votes'):
-            self.data_manager.tier_bounds_min_votes = 10
-        if not hasattr(self.data_manager, 'tier_bounds_adaptive'):
-            self.data_manager.tier_bounds_adaptive = True
-        
-        # Ensure existing settings exist
-        if not hasattr(self.data_manager, 'overflow_threshold'):
-            self.data_manager.overflow_threshold = 1.0
-        if not hasattr(self.data_manager, 'min_overflow_images'):
-            self.data_manager.min_overflow_images = 2
-        if not hasattr(self.data_manager, 'tier_distribution_std'):
-            self.data_manager.tier_distribution_std = 1.5
     
     def show(self):
         """Show the settings window."""
@@ -159,7 +130,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         checkbox_frame = tk.Frame(controls_frame, bg=Colors.BG_SECONDARY)
         checkbox_frame.pack(fill=tk.X, pady=5)
         
-        self.tier_bounds_enabled_var = tk.BooleanVar(value=getattr(self.data_manager, 'tier_bounds_enabled', True))
+        self.tier_bounds_enabled_var = tk.BooleanVar(value=self.data_manager.tier_bounds_manager.enabled)
         
         # Create checkbox with proper styling to show check state
         checkbox = tk.Checkbutton(checkbox_frame, text="Enable Tier Bounds", 
@@ -181,7 +152,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         self.tier_bounds_status_label.pack(anchor=tk.W, padx=20)
         
         # Adaptive bounds checkbox
-        self.tier_bounds_adaptive_var = tk.BooleanVar(value=getattr(self.data_manager, 'tier_bounds_adaptive', True))
+        self.tier_bounds_adaptive_var = tk.BooleanVar(value=self.data_manager.tier_bounds_manager.adaptive)
         adaptive_checkbox = tk.Checkbutton(checkbox_frame, text="Adaptive Bounds (grow with collection size)", 
                                           variable=self.tier_bounds_adaptive_var,
                                           font=('Arial', 10), fg=Colors.TEXT_SECONDARY, 
@@ -201,7 +172,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         tk.Label(std_frame, text="How many standard deviations from tier 0 to allow (3.0 = 99.7% containment)", 
                 font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        current_value = getattr(self.data_manager, 'tier_bounds_std_multiplier', 3.0)
+        current_value = self.data_manager.tier_bounds_manager.std_multiplier
         self.tier_bounds_std_multiplier_label = tk.Label(std_frame, text=f"Current: {current_value:.1f} std devs", 
                                                        fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         self.tier_bounds_std_multiplier_label.pack(anchor=tk.W)
@@ -226,7 +197,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         tk.Label(confidence_frame, text="Images need this confidence level to go beyond bounds (0.8 = 80%)", 
                 font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        current_value = getattr(self.data_manager, 'tier_bounds_min_confidence', 0.8)
+        current_value = self.data_manager.tier_bounds_manager.min_confidence
         self.tier_bounds_min_confidence_label = tk.Label(confidence_frame, text=f"Current: {current_value:.1%}", 
                                                        fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         self.tier_bounds_min_confidence_label.pack(anchor=tk.W)
@@ -251,7 +222,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         tk.Label(votes_frame, text="Images need this many votes to go beyond bounds", 
                 font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        current_value = getattr(self.data_manager, 'tier_bounds_min_votes', 10)
+        current_value = self.data_manager.tier_bounds_manager.min_votes
         self.tier_bounds_min_votes_label = tk.Label(votes_frame, text=f"Current: {current_value} votes", 
                                                   fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         self.tier_bounds_min_votes_label.pack(anchor=tk.W)
@@ -303,7 +274,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         tk.Label(tier_frame, text="Standard Deviation", 
                 font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        current_value = getattr(self.data_manager, 'tier_distribution_std', 1.5)
+        current_value = self.data_manager.algorithm_settings.tier_distribution_std
         self.tier_std_label = tk.Label(tier_frame, text=f"Current: {current_value:.2f}", 
                                       fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         self.tier_std_label.pack(anchor=tk.W)
@@ -352,7 +323,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         tk.Label(threshold_frame, text="Overflow Threshold", 
                 font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        current_value = getattr(self.data_manager, 'overflow_threshold', 1.0)
+        current_value = self.data_manager.algorithm_settings.overflow_threshold
         self.overflow_threshold_label = tk.Label(threshold_frame, text=f"Current: {current_value:.2f}x expected", 
                                                fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         self.overflow_threshold_label.pack(anchor=tk.W)
@@ -374,7 +345,7 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
         tk.Label(min_images_frame, text="Minimum Images for Overflow", 
                 font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY).pack(anchor=tk.W)
         
-        current_value = getattr(self.data_manager, 'min_overflow_images', 2)
+        current_value = self.data_manager.algorithm_settings.min_overflow_images
         self.min_overflow_images_label = tk.Label(min_images_frame, text=f"Current: {current_value} images", 
                                                 fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY)
         self.min_overflow_images_label.pack(anchor=tk.W)
@@ -459,28 +430,28 @@ This ensures a stable, bounded tier system while allowing truly exceptional imag
             temp_adaptive = self.tier_bounds_adaptive_var.get()
             
             # Save current settings
-            old_enabled = getattr(self.data_manager, 'tier_bounds_enabled', True)
-            old_std_mult = getattr(self.data_manager, 'tier_bounds_std_multiplier', 3.0)
-            old_min_conf = getattr(self.data_manager, 'tier_bounds_min_confidence', 0.8)
-            old_min_votes = getattr(self.data_manager, 'tier_bounds_min_votes', 10)
-            old_adaptive = getattr(self.data_manager, 'tier_bounds_adaptive', True)
+            old_enabled = self.data_manager.tier_bounds_manager.enabled
+            old_std_mult = self.data_manager.tier_bounds_manager.std_multiplier
+            old_min_conf = self.data_manager.tier_bounds_manager.min_confidence
+            old_min_votes = self.data_manager.tier_bounds_manager.min_votes
+            old_adaptive = self.data_manager.tier_bounds_manager.adaptive
             
             # Temporarily set new values
-            self.data_manager.tier_bounds_enabled = temp_enabled
-            self.data_manager.tier_bounds_std_multiplier = temp_std_mult
-            self.data_manager.tier_bounds_min_confidence = temp_min_conf
-            self.data_manager.tier_bounds_min_votes = temp_min_votes
-            self.data_manager.tier_bounds_adaptive = temp_adaptive
+            self.data_manager.tier_bounds_manager.enabled = temp_enabled
+            self.data_manager.tier_bounds_manager.std_multiplier = temp_std_mult
+            self.data_manager.tier_bounds_manager.min_confidence = temp_min_conf
+            self.data_manager.tier_bounds_manager.min_votes = temp_min_votes
+            self.data_manager.tier_bounds_manager.adaptive = temp_adaptive
             
             # Get status
             bounds_info = self.data_manager.get_tier_bounds_info()
             
             # Restore old values
-            self.data_manager.tier_bounds_enabled = old_enabled
-            self.data_manager.tier_bounds_std_multiplier = old_std_mult
-            self.data_manager.tier_bounds_min_confidence = old_min_conf
-            self.data_manager.tier_bounds_min_votes = old_min_votes
-            self.data_manager.tier_bounds_adaptive = old_adaptive
+            self.data_manager.tier_bounds_manager.enabled = old_enabled
+            self.data_manager.tier_bounds_manager.std_multiplier = old_std_mult
+            self.data_manager.tier_bounds_manager.min_confidence = old_min_conf
+            self.data_manager.tier_bounds_manager.min_votes = old_min_votes
+            self.data_manager.tier_bounds_manager.adaptive = old_adaptive
             
             if bounds_info['enabled']:
                 status_text = f"""Current Tier Bounds Status (Preview):
@@ -534,11 +505,16 @@ UI Variables:
 • tier_bounds_adaptive_var: {self.tier_bounds_adaptive_var.get() if self.tier_bounds_adaptive_var else 'None'}
 
 Data Manager Attributes:
-• tier_bounds_enabled: {getattr(self.data_manager, 'tier_bounds_enabled', 'NOT SET')}
-• tier_bounds_std_multiplier: {getattr(self.data_manager, 'tier_bounds_std_multiplier', 'NOT SET')}
-• tier_bounds_min_confidence: {getattr(self.data_manager, 'tier_bounds_min_confidence', 'NOT SET')}
-• tier_bounds_min_votes: {getattr(self.data_manager, 'tier_bounds_min_votes', 'NOT SET')}
-• tier_bounds_adaptive: {getattr(self.data_manager, 'tier_bounds_adaptive', 'NOT SET')}
+• tier_bounds_manager.enabled: {self.data_manager.tier_bounds_manager.enabled}
+• tier_bounds_manager.std_multiplier: {self.data_manager.tier_bounds_manager.std_multiplier}
+• tier_bounds_manager.min_confidence: {self.data_manager.tier_bounds_manager.min_confidence}
+• tier_bounds_manager.min_votes: {self.data_manager.tier_bounds_manager.min_votes}
+• tier_bounds_manager.adaptive: {self.data_manager.tier_bounds_manager.adaptive}
+
+Algorithm Settings:
+• tier_distribution_std: {self.data_manager.algorithm_settings.tier_distribution_std}
+• overflow_threshold: {self.data_manager.algorithm_settings.overflow_threshold}
+• min_overflow_images: {self.data_manager.algorithm_settings.min_overflow_images}
 
 Status Label Text: {self.tier_bounds_status_label.cget('text') if hasattr(self, 'tier_bounds_status_label') else 'NOT SET'}"""
             
@@ -653,25 +629,25 @@ Status Label Text: {self.tier_bounds_status_label.cget('text') if hasattr(self, 
         """Apply the setting changes."""
         # Apply tier bounds settings
         if self.tier_bounds_enabled_var is not None:
-            self.data_manager.tier_bounds_enabled = self.tier_bounds_enabled_var.get()
+            self.data_manager.tier_bounds_manager.enabled = self.tier_bounds_enabled_var.get()
         if self.tier_bounds_std_multiplier_var is not None:
-            self.data_manager.tier_bounds_std_multiplier = self.tier_bounds_std_multiplier_var.get()
+            self.data_manager.tier_bounds_manager.std_multiplier = self.tier_bounds_std_multiplier_var.get()
         if self.tier_bounds_min_confidence_var is not None:
-            self.data_manager.tier_bounds_min_confidence = self.tier_bounds_min_confidence_var.get()
+            self.data_manager.tier_bounds_manager.min_confidence = self.tier_bounds_min_confidence_var.get()
         if self.tier_bounds_min_votes_var is not None:
-            self.data_manager.tier_bounds_min_votes = self.tier_bounds_min_votes_var.get()
+            self.data_manager.tier_bounds_manager.min_votes = self.tier_bounds_min_votes_var.get()
         if self.tier_bounds_adaptive_var is not None:
-            self.data_manager.tier_bounds_adaptive = self.tier_bounds_adaptive_var.get()
+            self.data_manager.tier_bounds_manager.adaptive = self.tier_bounds_adaptive_var.get()
         
-        # Apply existing settings
+        # Apply algorithm settings
         if self.tier_std_var is not None:
-            self.data_manager.tier_distribution_std = self.tier_std_var.get()
+            self.data_manager.algorithm_settings.tier_distribution_std = self.tier_std_var.get()
         if self.overflow_threshold_var is not None:
-            self.data_manager.overflow_threshold = self.overflow_threshold_var.get()
+            self.data_manager.algorithm_settings.overflow_threshold = self.overflow_threshold_var.get()
         if self.min_overflow_images_var is not None:
-            self.data_manager.min_overflow_images = self.min_overflow_images_var.get()
+            self.data_manager.algorithm_settings.min_overflow_images = self.min_overflow_images_var.get()
         
-        bounds_status = "enabled" if self.data_manager.tier_bounds_enabled else "disabled"
+        bounds_status = "enabled" if self.data_manager.tier_bounds_manager.enabled else "disabled"
         messagebox.showinfo("Success", f"Settings updated successfully!\n\nTier bounds are now {bounds_status}.\nChanges will take effect immediately and will be saved when you save your progress.")
         self.close_window()
     

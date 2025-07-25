@@ -47,7 +47,6 @@ class Defaults:
     
     LEFT_SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
     RIGHT_SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
-    SELECTION_WEIGHTS = BASE_SELECTION_WEIGHTS.copy()
     
     LEFT_PRIORITY_PREFERENCES = {
         'prioritize_high_stability': False,
@@ -69,7 +68,7 @@ class Defaults:
     
     PROMPT_KEYWORDS = [
         'parameters', 'prompt', 'description', 'comment', 
-        'positive', 'negative', 'sd-metadata', 'dream',
+        'positive', 'negative', 'sd-metadata',
         'generation_data', 'invokeai_metadata'
     ]
     

@@ -30,8 +30,6 @@ class DataManager:
         self.weight_manager.reset_to_defaults()
         self.tier_bounds_manager.reset_to_defaults()
         self.algorithm_settings.reset_to_defaults()
-        self._last_calculated_rankings = None
-        self._last_calculation_vote_count = -1
     
     def record_vote(self, winner: str, loser: str) -> None:
         """Record a vote between two images with tier bounds checking."""
@@ -46,9 +44,9 @@ class DataManager:
         
         # Check if moves are allowed
         winner_can_move, winner_reason = self.tier_bounds_manager.can_move_to_tier(
-            winner, winner_target_tier, self.image_stats, self.tier_distribution_std)
+            winner, winner_target_tier, self.image_stats, self.algorithm_settings.tier_distribution_std)
         loser_can_move, loser_reason = self.tier_bounds_manager.can_move_to_tier(
-            loser, loser_target_tier, self.image_stats, self.tier_distribution_std)
+            loser, loser_target_tier, self.image_stats, self.algorithm_settings.tier_distribution_std)
         
         # Update winner stats
         winner_stats = self.image_stats[winner]
@@ -81,8 +79,6 @@ class DataManager:
             print(f"Winner {winner} hit tier bound: {winner_reason}")
         if not loser_can_move:
             print(f"Loser {loser} hit tier bound: {loser_reason}")
-        
-        self._last_calculated_rankings = None
     
     def save_to_file(self, filename: str) -> bool:
         """Save all ranking data to a JSON file."""
@@ -135,103 +131,11 @@ class DataManager:
         for image_filename in self.image_stats:
             self.initialize_image_stats(image_filename)
         
-        self._last_calculated_rankings = None
-        
         return True, ""
-    
-    # Algorithm settings property accessors for backward compatibility
-    @property
-    def tier_distribution_std(self):
-        return self.algorithm_settings.tier_distribution_std
-    
-    @tier_distribution_std.setter
-    def tier_distribution_std(self, value):
-        self.algorithm_settings.set_value('tier_distribution_std', value)
-    
-    @property
-    def confidence_vote_scale(self):
-        return self.algorithm_settings.confidence_vote_scale
-    
-    @confidence_vote_scale.setter
-    def confidence_vote_scale(self, value):
-        self.algorithm_settings.set_value('confidence_vote_scale', value)
-    
-    @property
-    def confidence_balance(self):
-        return self.algorithm_settings.confidence_balance
-    
-    @confidence_balance.setter
-    def confidence_balance(self, value):
-        self.algorithm_settings.set_value('confidence_balance', value)
-    
-    @property
-    def overflow_threshold(self):
-        return self.algorithm_settings.overflow_threshold
-    
-    @overflow_threshold.setter
-    def overflow_threshold(self, value):
-        self.algorithm_settings.set_value('overflow_threshold', value)
-    
-    @property
-    def min_overflow_images(self):
-        return self.algorithm_settings.min_overflow_images
-    
-    @min_overflow_images.setter
-    def min_overflow_images(self, value):
-        self.algorithm_settings.set_value('min_overflow_images', value)
-    
-    @property
-    def min_votes_for_stability(self):
-        return self.algorithm_settings.min_votes_for_stability
-    
-    @min_votes_for_stability.setter
-    def min_votes_for_stability(self, value):
-        self.algorithm_settings.set_value('min_votes_for_stability', value)
-    
-    # Tier bounds property accessors
-    @property
-    def tier_bounds_enabled(self):
-        return self.tier_bounds_manager.enabled
-    
-    @tier_bounds_enabled.setter
-    def tier_bounds_enabled(self, value):
-        self.tier_bounds_manager.enabled = value
-    
-    @property
-    def tier_bounds_std_multiplier(self):
-        return self.tier_bounds_manager.std_multiplier
-    
-    @tier_bounds_std_multiplier.setter
-    def tier_bounds_std_multiplier(self, value):
-        self.tier_bounds_manager.std_multiplier = value
-    
-    @property
-    def tier_bounds_min_confidence(self):
-        return self.tier_bounds_manager.min_confidence
-    
-    @tier_bounds_min_confidence.setter
-    def tier_bounds_min_confidence(self, value):
-        self.tier_bounds_manager.min_confidence = value
-    
-    @property
-    def tier_bounds_min_votes(self):
-        return self.tier_bounds_manager.min_votes
-    
-    @tier_bounds_min_votes.setter
-    def tier_bounds_min_votes(self, value):
-        self.tier_bounds_manager.min_votes = value
-    
-    @property
-    def tier_bounds_adaptive(self):
-        return self.tier_bounds_manager.adaptive
-    
-    @tier_bounds_adaptive.setter
-    def tier_bounds_adaptive(self, value):
-        self.tier_bounds_manager.adaptive = value
     
     def get_tier_bounds_info(self) -> Dict[str, Any]:
         """Get information about current tier bounds."""
-        return self.tier_bounds_manager.get_bounds_info(self.tier_distribution_std, self.image_stats)
+        return self.tier_bounds_manager.get_bounds_info(self.algorithm_settings.tier_distribution_std, self.image_stats)
     
     # Weight manager delegations
     def get_left_weights(self) -> Dict[str, float]:

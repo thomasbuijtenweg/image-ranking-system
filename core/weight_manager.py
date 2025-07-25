@@ -16,7 +16,6 @@ class WeightManager:
         self.right_weights = Defaults.RIGHT_SELECTION_WEIGHTS.copy()
         self.left_priority_preferences = Defaults.LEFT_PRIORITY_PREFERENCES.copy()
         self.right_priority_preferences = Defaults.RIGHT_PRIORITY_PREFERENCES.copy()
-        self.tier_distribution_std = 1.5
     
     def get_left_weights(self) -> Dict[str, float]:
         return self.left_weights.copy()
@@ -45,13 +44,6 @@ class WeightManager:
     def set_right_priority_preferences(self, preferences: Dict[str, bool]) -> None:
         if self.validate_preferences(preferences):
             self.right_priority_preferences = preferences.copy()
-    
-    def get_tier_distribution_std(self) -> float:
-        return self.tier_distribution_std
-    
-    def set_tier_distribution_std(self, std_dev: float) -> None:
-        if isinstance(std_dev, (int, float)) and std_dev > 0:
-            self.tier_distribution_std = std_dev
     
     def validate_weights(self, weights: Dict[str, float]) -> bool:
         """Validate weight values."""
@@ -111,11 +103,6 @@ class WeightManager:
                 self.left_priority_preferences = left_prefs
             if self.validate_preferences(right_prefs):
                 self.right_priority_preferences = right_prefs
-        
-        # Load tier distribution standard deviation
-        if 'tier_distribution_std' in data:
-            if isinstance(data['tier_distribution_std'], (int, float)) and data['tier_distribution_std'] > 0:
-                self.tier_distribution_std = data['tier_distribution_std']
     
     def export_to_data(self) -> Dict:
         """Export weights and preferences to data dictionary for saving."""
@@ -123,6 +110,5 @@ class WeightManager:
             'left_weights': self.left_weights,
             'right_weights': self.right_weights,
             'left_priority_preferences': self.left_priority_preferences,
-            'right_priority_preferences': self.right_priority_preferences,
-            'tier_distribution_std': self.tier_distribution_std
+            'right_priority_preferences': self.right_priority_preferences
         }
