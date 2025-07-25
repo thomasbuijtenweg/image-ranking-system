@@ -1,4 +1,4 @@
-"""Main window for the Image Ranking System."""
+"""Main window for the Image Ranking System with binning support."""
 
 import tkinter as tk
 from tkinter import messagebox, filedialog
@@ -91,6 +91,9 @@ class MainWindow:
         left_frame, right_frame = self.image_display.get_frames()
         self.voting_controller.create_vote_buttons(left_frame, right_frame)
         
+        # Set cross-references for binning functionality
+        self.folder_manager.set_voting_controller_reference(self.voting_controller)
+        
         self.folder_manager.set_ui_references(ui_refs['folder_label'], ui_refs['status_bar'])
         self.voting_controller.set_ui_references(ui_refs['status_bar'], ui_refs['stats_label'])
         
@@ -122,11 +125,15 @@ class MainWindow:
     def _on_images_loaded(self, images: list) -> None:
         """Handle completion of image loading."""
         ui_refs = self.ui_builder.get_ui_references()
-        ui_refs['stats_label'].config(text=f"Total votes: {self.data_manager.vote_count}")
+        active_count = self.data_manager.get_active_image_count()
+        binned_count = self.data_manager.get_binned_image_count()
+        ui_refs['stats_label'].config(
+            text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
+        )
         
         self.voting_controller.show_next_pair()
         
-        print(f"Successfully loaded {len(images)} images")
+        print(f"Successfully loaded {len(images)} images (Active: {active_count}, Binned: {binned_count})")
     
     def _on_vote_cast(self, winner: str, loser: str) -> None:
         """Handle vote being cast."""
@@ -145,7 +152,9 @@ class MainWindow:
         
         if filename:
             if self.data_manager.save_to_file(filename):
-                messagebox.showinfo("Success", f"Data saved to {filename}")
+                active_count = self.data_manager.get_active_image_count()
+                binned_count = self.data_manager.get_binned_image_count()
+                messagebox.showinfo("Success", f"Data saved to {filename}\n\nSaved {active_count} active images and {binned_count} binned images.")
             else:
                 messagebox.showerror("Error", "Failed to save data")
     
@@ -161,7 +170,11 @@ class MainWindow:
             
             if self.folder_manager.load_from_file(filename):
                 ui_refs = self.ui_builder.get_ui_references()
-                ui_refs['stats_label'].config(text=f"Total votes: {self.data_manager.vote_count}")
+                active_count = self.data_manager.get_active_image_count()
+                binned_count = self.data_manager.get_binned_image_count()
+                ui_refs['stats_label'].config(
+                    text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
+                )
     
     def show_detailed_stats(self) -> None:
         """Show the detailed statistics window."""

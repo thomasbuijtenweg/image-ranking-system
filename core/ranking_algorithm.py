@@ -20,25 +20,30 @@ class RankingAlgorithm:
     def select_next_pair(self, available_images: List[str], 
                         exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
         """Select next pair using tier overflow and confidence-based selection."""
-        if len(available_images) < 2:
+        
+        # Filter out binned images
+        active_images = [img for img in available_images 
+                        if not self.data_manager.is_image_binned(img)]
+        
+        if len(active_images) < 2:
             return None, None
         
-        # Find overflowing tiers
-        overflowing_tiers = self._find_overflowing_tiers(available_images)
+        # Find overflowing tiers (using only active images)
+        overflowing_tiers = self._find_overflowing_tiers(active_images)
         
         if not overflowing_tiers:
             # If no overflowing tiers, fall back to random selection
-            return self._fallback_random_selection(available_images, exclude_pair)
+            return self._fallback_random_selection(active_images, exclude_pair)
         
         # Select the most overflowing tier
-        selected_tier = self._select_most_overflowing_tier(overflowing_tiers, available_images)
+        selected_tier = self._select_most_overflowing_tier(overflowing_tiers, active_images)
         
         # Get images in selected tier
-        tier_images = [img for img in available_images 
+        tier_images = [img for img in active_images 
                        if self.data_manager.get_image_stats(img).get('current_tier', 0) == selected_tier]
         
         if len(tier_images) < 2:
-            return self._fallback_random_selection(available_images, exclude_pair)
+            return self._fallback_random_selection(active_images, exclude_pair)
         
         # Select left image (lowest confidence)
         left_image = self._select_lowest_confidence_image(selected_tier, tier_images)
@@ -50,16 +55,16 @@ class RankingAlgorithm:
         if left_image and right_image and left_image != right_image:
             return left_image, right_image
         
-        return self._fallback_random_selection(available_images, exclude_pair)
+        return self._fallback_random_selection(active_images, exclude_pair)
     
-    def _find_overflowing_tiers(self, available_images: List[str]) -> List[int]:
-        """Find tiers that have more images than expected based on normal distribution."""
+    def _find_overflowing_tiers(self, active_images: List[str]) -> List[int]:
+        """Find tiers that have more ACTIVE images than expected based on normal distribution."""
         tier_counts = defaultdict(int)
-        for img in available_images:
+        for img in active_images:  # Only count active images
             tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
             tier_counts[tier] += 1
         
-        total_images = len(available_images)
+        total_active_images = len(active_images)  # Use active image count
         overflowing_tiers = []
         
         # Get overflow settings from algorithm_settings
@@ -67,8 +72,8 @@ class RankingAlgorithm:
         min_overflow_images = self.data_manager.algorithm_settings.min_overflow_images
         
         for tier, actual_count in tier_counts.items():
-            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
-            expected_count = expected_proportion * total_images
+            expected_proportion = self._calculate_expected_tier_proportion(tier, total_active_images)
+            expected_count = expected_proportion * total_active_images
             
             # Consider a tier overflowing if it has more than the threshold percentage of expected count
             # and has at least the minimum number of images
@@ -78,18 +83,18 @@ class RankingAlgorithm:
         
         return overflowing_tiers
     
-    def _select_most_overflowing_tier(self, overflowing_tiers: List[int], available_images: List[str]) -> int:
+    def _select_most_overflowing_tier(self, overflowing_tiers: List[int], active_images: List[str]) -> int:
         """Select the most overflowing tier from the list."""
         if not overflowing_tiers:
             return 0
         
         # Calculate overflow amount for each tier
         tier_counts = defaultdict(int)
-        for img in available_images:
+        for img in active_images:  # Use active_images instead of available_images
             tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
             tier_counts[tier] += 1
         
-        total_images = len(available_images)
+        total_images = len(active_images)
         max_overflow = 0
         most_overflowing_tier = overflowing_tiers[0]
         
@@ -188,9 +193,9 @@ class RankingAlgorithm:
         # Return the best scoring image
         return scored_images[0][1]
     
-    def _fallback_random_selection(self, available_images: List[str], exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
+    def _fallback_random_selection(self, active_images: List[str], exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
         """Fallback to random selection when tier-based selection fails."""
-        if len(available_images) < 2:
+        if len(active_images) < 2:
             return None, None
         
         # Try random selection with exclusion
@@ -198,23 +203,25 @@ class RankingAlgorithm:
         
         max_attempts = 10
         for _ in range(max_attempts):
-            pair = random.sample(available_images, 2)
+            pair = random.sample(active_images, 2)
             if not exclude_set or set(pair) != exclude_set:
                 return pair[0], pair[1]
         
         # If we can't avoid exclude_pair, just return any pair
-        pair = random.sample(available_images, 2)
+        pair = random.sample(active_images, 2)
         return pair[0], pair[1]
     
-    def _calculate_expected_tier_proportion(self, tier: int, total_images: int) -> float:
+    def _calculate_expected_tier_proportion(self, tier: int, total_active_images: int) -> float:
         """Calculate expected proportion of images in a tier based on normal distribution."""
         std_dev = self.data_manager.algorithm_settings.tier_distribution_std
         
         density = math.exp(-(tier ** 2) / (2 * std_dev ** 2))
         
+        # Only consider tiers that have active images
         all_tiers = set()
-        for stats in self.data_manager.image_stats.values():
-            all_tiers.add(stats.get('current_tier', 0))
+        for img_name, stats in self.data_manager.image_stats.items():
+            if not self.data_manager.is_image_binned(img_name):  # Only active images
+                all_tiers.add(stats.get('current_tier', 0))
         
         total_density = sum(math.exp(-(t ** 2) / (2 * std_dev ** 2)) for t in all_tiers)
         

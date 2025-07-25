@@ -1,4 +1,4 @@
-"""Data persistence handler for the Image Ranking System."""
+"""Data persistence handler for the Image Ranking System with binning support."""
 
 import json
 import os
@@ -7,7 +7,7 @@ from typing import Dict, Any, Tuple, Optional
 
 
 class DataPersistence:
-    """Handles saving and loading data to/from JSON files."""
+    """Handles saving and loading data to/from JSON files including binned images."""
     
     CURRENT_VERSION = '2.1'
     REQUIRED_FIELDS = ['image_folder', 'vote_count', 'image_stats']
@@ -98,10 +98,10 @@ class DataPersistence:
                          algorithm_settings: Dict[str, Any],
                          tier_bounds_settings: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Prepare complete data dictionary for saving.
+        Add binned_images to save data.
         
         Args:
-            core_data: Core data (image_folder, vote_count, image_stats, metadata_cache)
+            core_data: Core data (image_folder, vote_count, image_stats, metadata_cache, binned_images)
             weight_data: Weight manager export data
             algorithm_settings: Algorithm settings export
             tier_bounds_settings: Tier bounds settings export
@@ -113,11 +113,16 @@ class DataPersistence:
         save_data.update(weight_data)
         save_data.update(algorithm_settings)
         save_data.update(tier_bounds_settings)
+        
+        # Ensure binned_images is included
+        if 'binned_images' not in save_data:
+            save_data['binned_images'] = []
+        
         return save_data
     
     def extract_core_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Extract core data fields from loaded data.
+        Extract core data including binned images.
         
         Args:
             data: Complete loaded data
@@ -129,7 +134,8 @@ class DataPersistence:
             'image_folder': data.get('image_folder', ''),
             'vote_count': data.get('vote_count', 0),
             'image_stats': data.get('image_stats', {}),
-            'metadata_cache': data.get('metadata_cache', {})
+            'metadata_cache': data.get('metadata_cache', {}),
+            'binned_images': set(data.get('binned_images', []))  # Convert to set
         }
     
     def get_version(self, data: Dict[str, Any]) -> str:

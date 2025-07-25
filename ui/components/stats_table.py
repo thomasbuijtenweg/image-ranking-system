@@ -1,8 +1,8 @@
 """
-Statistics table component for the Image Ranking System.
+Statistics table component for the Image Ranking System with binning support.
 
 This module handles the creation and management of the main statistics table,
-including sorting, population, and hover events.
+including sorting, population, and hover events with binning status.
 """
 
 import tkinter as tk
@@ -17,7 +17,7 @@ class StatsTable:
     Handles the main statistics table display and interaction.
     
     This component manages the sortable table showing individual image
-    statistics with hover functionality for image preview.
+    statistics with hover functionality for image preview and binning status.
     """
     
     def __init__(self, data_manager, ranking_algorithm, prompt_analyzer):
@@ -47,7 +47,7 @@ class StatsTable:
     
     def create_stats_table(self, parent_frame):
         """
-        Create the main statistics table with sortable columns.
+        Create the main statistics table with sortable columns including binning status.
         
         Args:
             parent_frame: Parent frame to contain the table
@@ -59,8 +59,8 @@ class StatsTable:
         self.table_frame = tk.Frame(parent_frame, bg=Colors.BG_SECONDARY)
         self.table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Define columns - added Confidence column
-        columns = ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Confidence', 'Last Voted', 'Prompt Preview')
+        # Define columns - added Status column for binning
+        columns = ('Image', 'Status', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Confidence', 'Last Voted', 'Prompt Preview')
         
         # Create treeview with scrollbar
         self.stats_tree = ttk.Treeview(self.table_frame, columns=columns, show='tree headings', height=20)
@@ -70,6 +70,7 @@ class StatsTable:
         # Configure column headings with click handlers
         self.stats_tree.heading('#0', text='', anchor=tk.W)
         self.stats_tree.heading('Image', text='Image Name', anchor=tk.W)
+        self.stats_tree.heading('Status', text='Status', anchor=tk.CENTER)
         self.stats_tree.heading('Tier', text='Current Tier', anchor=tk.CENTER)
         self.stats_tree.heading('Votes', text='Total Votes', anchor=tk.CENTER)
         self.stats_tree.heading('Wins', text='Wins', anchor=tk.CENTER)
@@ -82,7 +83,8 @@ class StatsTable:
         
         # Set column widths
         self.stats_tree.column('#0', width=0, stretch=False)
-        self.stats_tree.column('Image', width=160)
+        self.stats_tree.column('Image', width=140)
+        self.stats_tree.column('Status', width=60)
         self.stats_tree.column('Tier', width=70)
         self.stats_tree.column('Votes', width=60)
         self.stats_tree.column('Wins', width=50)
@@ -91,7 +93,7 @@ class StatsTable:
         self.stats_tree.column('Stability', width=70)
         self.stats_tree.column('Confidence', width=80)
         self.stats_tree.column('Last Voted', width=80)
-        self.stats_tree.column('Prompt Preview', width=280)
+        self.stats_tree.column('Prompt Preview', width=260)
         
         # Bind click events to column headers for sorting
         for col in columns:
@@ -111,7 +113,7 @@ class StatsTable:
         return self.table_frame
     
     def populate_stats_table(self):
-        """Populate the statistics table with data."""
+        """Populate the statistics table with active and binned image data."""
         if not self.stats_tree:
             return
         
@@ -120,9 +122,17 @@ class StatsTable:
             for item in self.stats_tree.get_children():
                 self.stats_tree.delete(item)
             
-            # Get all images and their stats
+            # Get all images (active and binned)
             all_images = []
             for img_name, stats in self.data_manager.image_stats.items():
+                # Determine status
+                if self.data_manager.is_image_binned(img_name):
+                    status = "BINNED"
+                    status_color = "binned"
+                else:
+                    status = "ACTIVE"
+                    status_color = "active"
+                
                 # Calculate derived statistics
                 votes = stats.get('votes', 0)
                 wins = stats.get('wins', 0)
@@ -149,6 +159,8 @@ class StatsTable:
                 
                 all_images.append({
                     'name': img_name,
+                    'status': status,
+                    'status_color': status_color,
                     'tier': stats.get('current_tier', 0),
                     'votes': votes,
                     'wins': wins,
@@ -161,13 +173,14 @@ class StatsTable:
                     'prompt_preview': prompt_preview
                 })
             
-            # Sort by current tier (descending) by default
-            all_images.sort(key=lambda x: x['tier'], reverse=True)
+            # Sort: active images by tier (desc), then binned images at bottom
+            all_images.sort(key=lambda x: (x['status'] == 'BINNED', -x['tier'] if x['status'] == 'ACTIVE' else 0))
             
-            # Insert data into tree
+            # Insert data into tree with color coding
             for img_data in all_images:
-                self.stats_tree.insert('', tk.END, values=(
+                item = self.stats_tree.insert('', tk.END, values=(
                     img_data['name'],
+                    img_data['status'],
                     f"{img_data['tier']:+d}",
                     img_data['votes'],
                     img_data['wins'],
@@ -177,7 +190,11 @@ class StatsTable:
                     f"{img_data['confidence']:.2f}",
                     img_data['last_voted_str'],
                     img_data['prompt_preview']
-                ), tags=(img_data['name'],))  # Use filename as tag for hover detection
+                ), tags=(img_data['name'], img_data['status_color']))
+            
+            # Configure tags for color coding
+            self.stats_tree.tag_configure('active', foreground=Colors.TEXT_PRIMARY)
+            self.stats_tree.tag_configure('binned', foreground=Colors.TEXT_ERROR)
         
         except Exception as e:
             print(f"Error populating stats table: {e}")
@@ -212,30 +229,32 @@ class StatsTable:
                 
                 if column == 'Image':
                     return values[0].lower()  # Sort by name (case-insensitive)
+                elif column == 'Status':
+                    return values[1]  # Sort by status (ACTIVE/BINNED)
                 elif column == 'Tier':
-                    return int(values[1])  # Remove the + sign and convert to int
+                    return int(values[2])  # Remove the + sign and convert to int
                 elif column == 'Votes':
-                    return int(values[2])
-                elif column == 'Wins':
                     return int(values[3])
-                elif column == 'Losses':
+                elif column == 'Wins':
                     return int(values[4])
+                elif column == 'Losses':
+                    return int(values[5])
                 elif column == 'Win Rate':
-                    return float(values[5].rstrip('%'))  # Remove % and convert to float
+                    return float(values[6].rstrip('%'))  # Remove % and convert to float
                 elif column == 'Stability':
-                    return float(values[6])
-                elif column == 'Confidence':
                     return float(values[7])
+                elif column == 'Confidence':
+                    return float(values[8])
                 elif column == 'Last Voted':
                     # Special handling for "Never" and "Current"
-                    if values[8] == "Never":
+                    if values[9] == "Never":
                         return float('inf')
-                    elif values[8] == "Current":
+                    elif values[9] == "Current":
                         return 0
                     else:
-                        return int(values[8].split()[0])  # Extract number from "X ago"
+                        return int(values[9].split()[0])  # Extract number from "X ago"
                 elif column == 'Prompt Preview':
-                    return values[9].lower()
+                    return values[10].lower()
                 else:
                     return values[0]  # Default to name
             
@@ -247,7 +266,7 @@ class StatsTable:
                 self.stats_tree.move(item, '', index)
             
             # Update column header to show sort direction
-            columns = ('Image', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Confidence', 'Last Voted', 'Prompt Preview')
+            columns = ('Image', 'Status', 'Tier', 'Votes', 'Wins', 'Losses', 'Win Rate', 'Stability', 'Confidence', 'Last Voted', 'Prompt Preview')
             for col in columns:
                 if col == column:
                     direction = " ↓" if self.current_sort_reverse else " ↑"
@@ -405,11 +424,14 @@ class StatsTable:
         # Filter and add items
         for img_name, stats in self.data_manager.image_stats.items():
             if stats.get('current_tier', 0) == tier:
-                # This is a simplified version - in a full implementation,
-                # you'd want to recreate the full item data
+                # Determine status
+                status = "BINNED" if self.data_manager.is_image_binned(img_name) else "ACTIVE"
+                status_color = "binned" if status == "BINNED" else "active"
+                
                 confidence = self.ranking_algorithm._calculate_image_confidence(img_name)
                 self.stats_tree.insert('', tk.END, values=(
                     img_name,
+                    status,
                     f"{tier:+d}",
                     stats.get('votes', 0),
                     stats.get('wins', 0),
@@ -419,7 +441,11 @@ class StatsTable:
                     f"{confidence:.2f}",
                     "...",  # Simplified
                     "..."   # Simplified
-                ), tags=(img_name,))
+                ), tags=(img_name, status_color))
+        
+        # Configure tags for color coding
+        self.stats_tree.tag_configure('active', foreground=Colors.TEXT_PRIMARY)
+        self.stats_tree.tag_configure('binned', foreground=Colors.TEXT_ERROR)
     
     def reset_filter(self):
         """Reset any filters and show all images."""

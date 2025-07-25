@@ -1,4 +1,4 @@
-"""Enhanced Data Manager with intelligent tier bounds."""
+"""Enhanced Data Manager with intelligent tier bounds and image binning support."""
 
 import os
 from typing import Dict, Any, Optional, Tuple
@@ -12,7 +12,7 @@ from core.algorithm_settings import AlgorithmSettings
 
 
 class DataManager:
-    """Handles data persistence and ranking statistics with intelligent tier bounds."""
+    """Handles data persistence and ranking statistics with intelligent tier bounds and binning."""
     
     def __init__(self):
         self.weight_manager = WeightManager()
@@ -27,9 +27,47 @@ class DataManager:
         self.vote_count = 0
         self.image_stats = {}
         self.metadata_cache = {}
+        self.binned_images = set()  # Track binned image filenames
         self.weight_manager.reset_to_defaults()
         self.tier_bounds_manager.reset_to_defaults()
         self.algorithm_settings.reset_to_defaults()
+    
+    def bin_image(self, image_name: str) -> bool:
+        """
+        Mark an image as binned and remove it from active ranking.
+        
+        Args:
+            image_name: Name of the image to bin
+            
+        Returns:
+            True if successfully binned, False if already binned
+        """
+        if image_name in self.binned_images:
+            return False
+        
+        self.binned_images.add(image_name)
+        print(f"Image '{image_name}' has been binned")
+        return True
+    
+    def is_image_binned(self, image_name: str) -> bool:
+        """Check if an image is binned."""
+        return image_name in self.binned_images
+    
+    def get_active_images(self) -> list:
+        """Get list of active (non-binned) image names."""
+        return [img for img in self.image_stats.keys() if img not in self.binned_images]
+    
+    def get_binned_images(self) -> list:
+        """Get list of binned image names."""
+        return list(self.binned_images)
+    
+    def get_active_image_count(self) -> int:
+        """Get count of active (non-binned) images."""
+        return len(self.get_active_images())
+    
+    def get_binned_image_count(self) -> int:
+        """Get count of binned images."""
+        return len(self.binned_images)
     
     def record_vote(self, winner: str, loser: str) -> None:
         """Record a vote between two images with tier bounds checking."""
@@ -81,13 +119,14 @@ class DataManager:
             print(f"Loser {loser} hit tier bound: {loser_reason}")
     
     def save_to_file(self, filename: str) -> bool:
-        """Save all ranking data to a JSON file."""
+        """Save all ranking data including binned images."""
         # Prepare core data
         core_data = {
             'image_folder': self.image_folder,
             'vote_count': self.vote_count,
             'image_stats': self.image_stats,
-            'metadata_cache': self.metadata_cache
+            'metadata_cache': self.metadata_cache,
+            'binned_images': list(self.binned_images)  # Convert set to list for JSON
         }
         
         # Gather all settings
@@ -103,7 +142,7 @@ class DataManager:
         return self.data_persistence.save_to_file(filename, save_data)
     
     def load_from_file(self, filename: str) -> Tuple[bool, str]:
-        """Load ranking data from a JSON file."""
+        """Load ranking data including binned images."""
         # Load data from file
         success, data, error_msg = self.data_persistence.load_from_file(filename)
         if not success:
@@ -118,6 +157,7 @@ class DataManager:
         self.vote_count = core_data['vote_count']
         self.image_stats = core_data['image_stats']
         self.metadata_cache = core_data['metadata_cache']
+        self.binned_images = core_data['binned_images']  # This is already a set
         
         # Load other settings
         self.weight_manager.load_from_data(data)
@@ -132,6 +172,44 @@ class DataManager:
             self.initialize_image_stats(image_filename)
         
         return True, ""
+    
+    def get_tier_distribution(self) -> Dict[int, int]:
+        """Get the distribution of ACTIVE images across tiers."""
+        tier_counts = defaultdict(int)
+        for img_name, stats in self.image_stats.items():
+            if img_name not in self.binned_images:  # Only active images
+                tier_counts[stats['current_tier']] += 1
+        return dict(tier_counts)
+    
+    def get_overall_statistics(self) -> Dict[str, Any]:
+        """Calculate overall statistics for ACTIVE images only."""
+        active_images = self.get_active_images()
+        
+        if not active_images:
+            return {
+                'total_active_images': 0,
+                'total_binned_images': len(self.binned_images),
+                'total_votes': self.vote_count,
+                'avg_votes_per_active_image': 0,
+                'tier_distribution': {},
+                'tier_bounds_info': self.get_tier_bounds_info()
+            }
+        
+        total_active_images = len(active_images)
+        total_binned_images = len(self.binned_images)
+        total_votes = self.vote_count
+        avg_votes_per_active_image = sum(
+            self.image_stats[img]['votes'] for img in active_images
+        ) / total_active_images
+        
+        return {
+            'total_active_images': total_active_images,
+            'total_binned_images': total_binned_images,
+            'total_votes': total_votes,
+            'avg_votes_per_active_image': avg_votes_per_active_image,
+            'tier_distribution': self.get_tier_distribution(),
+            'tier_bounds_info': self.get_tier_bounds_info()
+        }
     
     def get_tier_bounds_info(self) -> Dict[str, Any]:
         """Get information about current tier bounds."""
@@ -219,36 +297,6 @@ class DataManager:
     def get_image_stats(self, image_filename: str) -> Dict[str, Any]:
         """Get statistics for a specific image."""
         return self.image_stats.get(image_filename, {})
-    
-    def get_tier_distribution(self) -> Dict[int, int]:
-        """Get the distribution of images across tiers."""
-        tier_counts = defaultdict(int)
-        for stats in self.image_stats.values():
-            tier_counts[stats['current_tier']] += 1
-        return dict(tier_counts)
-    
-    def get_overall_statistics(self) -> Dict[str, Any]:
-        """Calculate overall statistics for the ranking system."""
-        if not self.image_stats:
-            return {
-                'total_images': 0,
-                'total_votes': 0,
-                'avg_votes_per_image': 0,
-                'tier_distribution': {},
-                'tier_bounds_info': self.get_tier_bounds_info()
-            }
-        
-        total_images = len(self.image_stats)
-        total_votes = self.vote_count
-        avg_votes_per_image = sum(s['votes'] for s in self.image_stats.values()) / total_images
-        
-        return {
-            'total_images': total_images,
-            'total_votes': total_votes,
-            'avg_votes_per_image': avg_votes_per_image,
-            'tier_distribution': self.get_tier_distribution(),
-            'tier_bounds_info': self.get_tier_bounds_info()
-        }
     
     def _update_existing_images_with_strategic_timing(self) -> None:
         """Update existing images that have never been voted on to use strategic timing."""

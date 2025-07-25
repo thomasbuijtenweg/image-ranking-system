@@ -1,9 +1,10 @@
-"""Voting controller for the Image Ranking System."""
+"""Voting controller for the Image Ranking System with binning support."""
 
 import tkinter as tk
 from typing import Optional, Tuple
 
 from config import Colors, Defaults
+from core.image_binner import ImageBinner
 
 
 class VotingController:
@@ -28,6 +29,9 @@ class VotingController:
         self.preload_timer = None
         
         self.on_vote_callback = None
+        
+        # Image binner - will be initialized when folder is set
+        self.image_binner = None
     
     def create_vote_buttons(self, left_frame: tk.Frame, right_frame: tk.Frame) -> None:
         """Create vote buttons for both sides."""
@@ -70,6 +74,65 @@ class VotingController:
     def set_vote_callback(self, callback) -> None:
         """Set callback function to be called after each vote."""
         self.on_vote_callback = callback
+    
+    def set_image_folder(self, folder_path: str) -> None:
+        """Set the image folder and initialize the binner."""
+        self.image_binner = ImageBinner(folder_path)
+    
+    def bin_current_loser(self) -> None:
+        """Bin the current losing image (called by down arrow)."""
+        if not self.current_pair[0] or not self.current_pair[1]:
+            return
+        
+        if not self.image_binner:
+            print("Error: Image binner not initialized")
+            return
+        
+        # Determine winner and loser based on standard voting
+        # For down arrow, we assume left image wins, right image gets binned
+        winner = self.current_pair[0]
+        loser = self.current_pair[1]
+        
+        # Record the normal vote first
+        self.data_manager.record_vote(winner, loser)
+        
+        # Bin the loser
+        success = self.data_manager.bin_image(loser)
+        if success:
+            # Move the physical file
+            move_success, error_msg = self.image_binner.move_image_to_bin(loser)
+            if move_success:
+                # Update UI
+                if self.stats_label:
+                    active_count = self.data_manager.get_active_image_count()
+                    binned_count = self.data_manager.get_binned_image_count()
+                    self.stats_label.config(
+                        text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
+                    )
+                
+                if self.status_bar:
+                    self.status_bar.config(
+                        text=f"Vote recorded and {loser} binned to Bin folder"
+                    )
+                
+                print(f"Successfully binned image: {loser}")
+            else:
+                # File move failed - remove from binned set
+                self.data_manager.binned_images.discard(loser)
+                if self.status_bar:
+                    self.status_bar.config(text=f"Error binning image: {error_msg}")
+                print(f"Failed to bin image: {error_msg}")
+        
+        # Disable buttons and proceed to next pair
+        if self.left_vote_button:
+            self.left_vote_button.config(state=tk.DISABLED)
+        if self.right_vote_button:
+            self.right_vote_button.config(state=tk.DISABLED)
+        
+        if self.on_vote_callback:
+            self.on_vote_callback(winner, loser)
+        
+        self.parent.after(Defaults.VOTE_DELAY_MS, self.show_next_pair)
     
     def show_next_pair(self) -> None:
         """Display the next pair of images for voting."""
@@ -141,7 +204,11 @@ class VotingController:
         # Cache invalidation removed - it was never actually used
         
         if self.stats_label:
-            self.stats_label.config(text=f"Total votes: {self.data_manager.vote_count}")
+            active_count = self.data_manager.get_active_image_count()
+            binned_count = self.data_manager.get_binned_image_count()
+            self.stats_label.config(
+                text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
+            )
         
         if self.status_bar:
             self.status_bar.config(text=f"Vote recorded: {winner} wins over {loser}")
@@ -169,6 +236,9 @@ class VotingController:
         
         for key in KeyBindings.VOTE_RIGHT:
             self.parent.bind(key, lambda e: self.vote('right') if self.right_vote_button and self.right_vote_button['state'] == tk.NORMAL else None)
+        
+        # New binning shortcut
+        self.parent.bind('<Down>', lambda e: self.bin_current_loser() if self.left_vote_button and self.left_vote_button['state'] == tk.NORMAL else None)
     
     def reset_voting_state(self) -> None:
         """Reset voting state when loading new images."""
