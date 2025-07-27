@@ -12,6 +12,7 @@ class Colors:
     TEXT_SUCCESS = '#66ff66'
     TEXT_ERROR = '#ff6666'
     TEXT_INFO = '#6666ff'
+    TEXT_WARNING = '#ffaa00'
     
     BUTTON_SUCCESS = '#4CAF50'
     BUTTON_INFO = '#2196F3'
@@ -82,6 +83,8 @@ class KeyBindings:
     """Keyboard shortcut definitions."""
     VOTE_LEFT = ['<Left>', '<a>']
     VOTE_RIGHT = ['<Right>', '<d>']
+    BIN_LOSER = ['<Down>']  # Toggle bin mode: next loser will be binned (press ↓ then vote normally)
+    BIN_LAST_LOSER = ['<b>', '<B>']  # Bin the loser from the last vote (after voting)
     SAVE = ['<Control-s>']
     LOAD = ['<Control-o>']
     STATS = ['<Control-t>']

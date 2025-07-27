@@ -1,4 +1,4 @@
-"""Folder manager for the Image Ranking System."""
+"""Folder manager for the Image Ranking System with binning support."""
 
 import os
 import time
@@ -20,6 +20,9 @@ class FolderManager:
         self.on_load_complete_callback = None
         self.on_progress_callback = None
         
+        # Reference to voting controller for initialization
+        self.voting_controller = None
+        
         self.metadata_processor.set_progress_callback(self._on_metadata_progress)
         self.metadata_processor.set_complete_callback(self._on_metadata_complete)
         
@@ -38,11 +41,17 @@ class FolderManager:
         """Set callback for progress updates."""
         self.on_progress_callback = callback
     
+    def set_voting_controller_reference(self, voting_controller) -> None:
+        """Set reference to voting controller for initialization."""
+        self.voting_controller = voting_controller
+        print(f"Voting controller reference set: {voting_controller is not None}")
+    
     def select_folder(self) -> bool:
         """Handle folder selection for image loading."""
         folder = filedialog.askdirectory(title="Select folder containing images (includes subfolders)")
         if folder:
             self.data_manager.image_folder = folder
+            print(f"Selected folder: {folder}")
             self.load_images()
             return True
         return False
@@ -53,7 +62,16 @@ class FolderManager:
             return
         
         start_time = time.time()
-        images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        
+        # Use compatible image file scanning
+        try:
+            # Try with exclude_bin_folder parameter first
+            images = self.image_processor.get_image_files(self.data_manager.image_folder, exclude_bin_folder=True)
+        except TypeError:
+            # Fallback for older image_processor without exclude_bin_folder parameter
+            print("Using fallback image scanning (older image_processor)")
+            images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        
         scan_time = time.time() - start_time
         
         if not images:
@@ -75,8 +93,32 @@ class FolderManager:
         
         self.metadata_processor.start_background_extraction(images)
         
+        # Initialize image binner for voting controller - CRITICAL!
+        if self.voting_controller:
+            print(f"Initializing image binner with folder: {self.data_manager.image_folder}")
+            try:
+                self.voting_controller.set_image_folder(self.data_manager.image_folder)
+                print("Image binner initialization completed successfully")
+            except Exception as e:
+                print(f"Error during image binner initialization: {e}")
+                import traceback
+                traceback.print_exc()
+        else:
+            print("ERROR: Voting controller reference not set!")
+        
         if self.status_bar:
-            self.status_bar.config(text=f"Loaded {len(images)} images. All images initialized at tier 0 with strategic vote timing. Metadata extraction running in background. Ready to vote!")
+            # Use compatible method calls
+            total_images = len(images)
+            if hasattr(self.data_manager, 'binned_images'):
+                binned_count = len(self.data_manager.binned_images)
+                active_count = total_images - binned_count
+            else:
+                active_count = total_images
+                binned_count = 0
+            
+            self.status_bar.config(
+                text=f"Loaded {len(images)} images. Active: {active_count}, Binned: {binned_count}. Ready to vote! (↓ to toggle bin mode)"
+            )
         
         if self.on_load_complete_callback:
             self.on_load_complete_callback(images)
@@ -110,7 +152,16 @@ class FolderManager:
     def _on_metadata_complete(self, total_processed: int) -> None:
         """Handle metadata extraction completion."""
         if self.status_bar:
-            final_text = f"Metadata extraction complete for {total_processed} images. Ready to vote!"
+            # Use compatible method calls
+            total_images = len(self.data_manager.image_stats)
+            if hasattr(self.data_manager, 'binned_images'):
+                binned_count = len(self.data_manager.binned_images)
+                active_count = total_images - binned_count
+            else:
+                active_count = total_images
+                binned_count = 0
+            
+            final_text = f"Metadata extraction complete for {total_processed} images. Active: {active_count}, Binned: {binned_count}. Ready to vote! (↓ to toggle bin mode)"
             self.status_bar.config(text=final_text)
         
         print(f"Background metadata extraction completed for {total_processed} images")
@@ -129,7 +180,8 @@ class FolderManager:
         success, error_msg = self.data_manager.load_from_file(filename)
         if success:
             if self.data_manager.image_folder:
-                self.load_images()
+                print(f"Reloading images from saved folder: {self.data_manager.image_folder}")
+                self.load_images()  # This will now properly initialize the image binner
             
             left_weights = self.data_manager.get_left_weights()
             right_weights = self.data_manager.get_right_weights()
@@ -139,7 +191,18 @@ class FolderManager:
             else:
                 weights_message = "\n\nUsing same weights for both left and right selection."
             
-            messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}")
+            # Include binning information in success message
+            total_images = len(self.data_manager.image_stats)
+            if hasattr(self.data_manager, 'binned_images'):
+                binned_count = len(self.data_manager.binned_images)
+                active_count = total_images - binned_count
+            else:
+                active_count = total_images
+                binned_count = 0
+            
+            binning_message = f"\n\nLoaded {active_count} active images and {binned_count} binned images."
+            
+            messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}{binning_message}")
             return True
         else:
             messagebox.showerror("Error", f"Could not load data: {error_msg}")
@@ -158,7 +221,13 @@ class FolderManager:
         if not self.data_manager.image_folder:
             return 0
         
-        images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        try:
+            # Try with exclude_bin_folder parameter first
+            images = self.image_processor.get_image_files(self.data_manager.image_folder, exclude_bin_folder=True)
+        except TypeError:
+            # Fallback for older image_processor
+            images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        
         return len(images)
     
     def cleanup(self) -> None:
