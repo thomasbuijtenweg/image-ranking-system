@@ -1,4 +1,3 @@
-
 """Core business logic modules for the Image Ranking System."""
 
 from .data_manager import DataManager
@@ -11,6 +10,7 @@ from .confidence_calculator import ConfidenceCalculator
 from .tier_bounds_manager import TierBoundsManager
 from .data_persistence import DataPersistence
 from .algorithm_settings import AlgorithmSettings
+from .image_binner import ImageBinner
 
-__all__ = ['DataManager', 'ImageProcessor', 'RankingAlgorithm', 'PromptAnalyzer', 'MetadataExtractor', 'WeightManager', 'ConfidenceCalculator', 'TierBoundsManager', 'DataPersistence', 'AlgorithmSettings']
+__all__ = ['DataManager', 'ImageProcessor', 'RankingAlgorithm', 'PromptAnalyzer', 'MetadataExtractor', 'WeightManager', 'ConfidenceCalculator', 'TierBoundsManager', 'DataPersistence', 'AlgorithmSettings', 'ImageBinner']
 __version__ = '1.0.0'
