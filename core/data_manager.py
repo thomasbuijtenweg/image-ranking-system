@@ -182,34 +182,73 @@ class DataManager:
         return dict(tier_counts)
     
     def get_overall_statistics(self) -> Dict[str, Any]:
-        """Calculate overall statistics for ACTIVE images only."""
-        active_images = self.get_active_images()
-        
-        if not active_images:
+        """Calculate overall statistics with enhanced error handling and backward compatibility."""
+        try:
+            active_images = self.get_active_images()
+            total_active_images = len(active_images)
+            total_binned_images = len(self.binned_images)
+            total_images = total_active_images + total_binned_images
+            
+            if not active_images:
+                return {
+                    'total_images': total_images,  # For backward compatibility
+                    'total_active_images': 0,
+                    'total_binned_images': total_binned_images,
+                    'total_votes': self.vote_count,
+                    'avg_votes_per_image': 0,  # For backward compatibility
+                    'avg_votes_per_active_image': 0,
+                    'tier_distribution': {},
+                    'tier_bounds_info': self.get_tier_bounds_info()
+                }
+            
+            total_votes = self.vote_count
+            
+            # Calculate average votes per active image
+            try:
+                total_active_votes = sum(
+                    self.image_stats[img]['votes'] for img in active_images
+                    if img in self.image_stats
+                )
+                avg_votes_per_active_image = total_active_votes / total_active_images
+            except (KeyError, ZeroDivisionError, TypeError) as e:
+                print(f"Error calculating average votes per active image: {e}")
+                avg_votes_per_active_image = 0
+            
+            # Calculate average votes per total image (for backward compatibility)
+            try:
+                total_all_votes = sum(
+                    self.image_stats[img]['votes'] for img in self.image_stats
+                    if img in self.image_stats
+                )
+                avg_votes_per_image = total_all_votes / total_images if total_images > 0 else 0
+            except (KeyError, ZeroDivisionError, TypeError) as e:
+                print(f"Error calculating average votes per total image: {e}")
+                avg_votes_per_image = 0
+            
             return {
-                'total_active_images': 0,
-                'total_binned_images': len(self.binned_images),
-                'total_votes': self.vote_count,
-                'avg_votes_per_active_image': 0,
-                'tier_distribution': {},
+                'total_images': total_images,  # For backward compatibility
+                'total_active_images': total_active_images,
+                'total_binned_images': total_binned_images,
+                'total_votes': total_votes,
+                'avg_votes_per_image': avg_votes_per_image,  # For backward compatibility
+                'avg_votes_per_active_image': avg_votes_per_active_image,
+                'tier_distribution': self.get_tier_distribution(),
                 'tier_bounds_info': self.get_tier_bounds_info()
             }
-        
-        total_active_images = len(active_images)
-        total_binned_images = len(self.binned_images)
-        total_votes = self.vote_count
-        avg_votes_per_active_image = sum(
-            self.image_stats[img]['votes'] for img in active_images
-        ) / total_active_images
-        
-        return {
-            'total_active_images': total_active_images,
-            'total_binned_images': total_binned_images,
-            'total_votes': total_votes,
-            'avg_votes_per_active_image': avg_votes_per_active_image,
-            'tier_distribution': self.get_tier_distribution(),
-            'tier_bounds_info': self.get_tier_bounds_info()
-        }
+            
+        except Exception as e:
+            print(f"Error in get_overall_statistics: {e}")
+            # Return safe defaults
+            return {
+                'total_images': len(self.image_stats),
+                'total_active_images': 0,
+                'total_binned_images': 0,
+                'total_votes': self.vote_count,
+                'avg_votes_per_image': 0,
+                'avg_votes_per_active_image': 0,
+                'tier_distribution': {},
+                'tier_bounds_info': {}
+            }
     
     def get_tier_bounds_info(self) -> Dict[str, Any]:
         """Get information about current tier bounds."""

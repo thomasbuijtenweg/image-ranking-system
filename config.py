@@ -83,7 +83,8 @@ class KeyBindings:
     """Keyboard shortcut definitions."""
     VOTE_LEFT = ['<Left>', '<a>']
     VOTE_RIGHT = ['<Right>', '<d>']
-    BIN_LOSER = ['<Down>']  # New binning shortcut
+    BIN_LOSER = ['<Down>']  # Toggle bin mode: next loser will be binned (press ↓ then vote normally)
+    BIN_LAST_LOSER = ['<b>', '<B>']  # Bin the loser from the last vote (after voting)
     SAVE = ['<Control-s>']
     LOAD = ['<Control-o>']
     STATS = ['<Control-t>']

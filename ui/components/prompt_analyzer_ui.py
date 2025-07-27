@@ -6,7 +6,7 @@ table, search functionality, and hover interactions with enhanced binning statis
 """
 
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, messagebox
 from typing import Callable, List, Optional
 
 from config import Colors
@@ -75,7 +75,7 @@ class PromptAnalyzerUI:
                            f"{summary['avg_words_per_active_image']:.1f} avg words/active image")
         except Exception as e:
             print(f"Error getting analysis summary: {e}")
-            summary_text = "Error loading enhanced analysis summary"
+            summary_text = f"Error loading enhanced analysis summary: {str(e)}"
         
         summary_label = tk.Label(control_frame, text=summary_text, 
                                 font=('Arial', 11, 'bold'), fg=Colors.TEXT_PRIMARY, 
@@ -177,67 +177,137 @@ class PromptAnalyzerUI:
         if not self.word_tree:
             return
         
+        # Clear existing items
+        for item in self.word_tree.get_children():
+            self.word_tree.delete(item)
+        
+        # Check if we have any prompt data
+        prompt_count = sum(1 for stats in self.data_manager.image_stats.values() 
+                          if stats.get('prompt'))
+        
+        if prompt_count == 0:
+            # Show message if no prompt data
+            placeholder_item = self.word_tree.insert('', tk.END, values=(
+                "No prompt data available", "", "", "", "", "", "Load images with AI generation prompts to analyze"
+            ))
+            self.word_tree.tag_configure('placeholder', foreground=Colors.TEXT_SECONDARY)
+            self.word_tree.item(placeholder_item, tags=('placeholder',))
+            return
+        
         try:
-            # Clear existing items
-            for item in self.word_tree.get_children():
-                self.word_tree.delete(item)
-            
             # Get search term
             search_term = self.search_var.get().strip().lower() if self.search_var else ""
             
             # Get word analysis
             if search_term:
-                word_data = self.prompt_analyzer.search_words_by_pattern(search_term)
+                try:
+                    word_data = self.prompt_analyzer.search_words_by_pattern(search_term)
+                except Exception as e:
+                    print(f"Error searching words: {e}")
+                    error_item = self.word_tree.insert('', tk.END, values=(
+                        f"Search error: {str(e)}", "", "", "", "", "", ""
+                    ))
+                    self.word_tree.tag_configure('error', foreground=Colors.TEXT_ERROR)
+                    self.word_tree.item(error_item, tags=('error',))
+                    return
             else:
-                # Sort by quality indicator by default (best words first)
-                word_analysis = self.prompt_analyzer.analyze_word_performance()
-                word_data = sorted(word_analysis.items(), 
-                                 key=lambda x: x[1]['quality_indicator'], reverse=True)
+                try:
+                    # Sort by quality indicator by default (best words first)
+                    word_analysis = self.prompt_analyzer.analyze_word_performance()
+                    if not word_analysis:
+                        # No word data available
+                        placeholder_item = self.word_tree.insert('', tk.END, values=(
+                            "No word analysis data", "", "", "", "", "", "Check if images have prompt metadata"
+                        ))
+                        self.word_tree.tag_configure('placeholder', foreground=Colors.TEXT_SECONDARY)
+                        self.word_tree.item(placeholder_item, tags=('placeholder',))
+                        return
+                    
+                    word_data = sorted(word_analysis.items(), 
+                                     key=lambda x: x[1].get('quality_indicator', 0), reverse=True)
+                except Exception as e:
+                    print(f"Error analyzing word performance: {e}")
+                    error_item = self.word_tree.insert('', tk.END, values=(
+                        f"Analysis error: {str(e)}", "", "", "", "", "", ""
+                    ))
+                    self.word_tree.tag_configure('error', foreground=Colors.TEXT_ERROR)
+                    self.word_tree.item(error_item, tags=('error',))
+                    return
             
             # Populate tree with enhanced data
             for word, data in word_data:
-                active_tiers = data['active_tiers']
+                try:
+                    active_tiers = data.get('active_tiers', [])
+                    
+                    # Get example images for this word
+                    try:
+                        example_images = self.get_example_images_for_word(word)
+                        example_text = ", ".join(example_images[:3])
+                        if len(example_images) > 3:
+                            example_text += f" (+{len(example_images)-3} more)"
+                    except Exception as e:
+                        print(f"Error getting examples for word '{word}': {e}")
+                        example_text = "Error getting examples"
+                    
+                    # Color coding based on quality and binning rate
+                    quality_score = data.get('quality_indicator', 0)
+                    binning_rate = data.get('binning_rate', 0)
+                    
+                    if binning_rate > 0.7:  # Very high binning rate
+                        tag_color = "terrible"
+                    elif binning_rate > 0.5:  # High binning rate
+                        tag_color = "poor"
+                    elif quality_score > 1.0:
+                        tag_color = "excellent"
+                    elif quality_score > 0.0:
+                        tag_color = "good"
+                    else:
+                        tag_color = "poor"
+                    
+                    # Insert item with enhanced data
+                    self.word_tree.insert('', tk.END, values=(
+                        word,
+                        data.get('active_frequency', 0),
+                        f"{data.get('average_tier', 0):.2f}",
+                        data.get('binned_frequency', 0),
+                        f"{data.get('binning_rate', 0):.1%}",
+                        f"{data.get('quality_indicator', 0):.2f}",
+                        example_text
+                    ), tags=(word, tag_color))
                 
-                # Get example images for this word
-                example_images = self.get_example_images_for_word(word)
-                example_text = ", ".join(example_images[:3])
-                if len(example_images) > 3:
-                    example_text += f" (+{len(example_images)-3} more)"
-                
-                # Color coding based on quality and binning rate
-                quality_score = data['quality_indicator']
-                binning_rate = data['binning_rate']
-                
-                if binning_rate > 0.7:  # Very high binning rate
-                    tag_color = "terrible"
-                elif binning_rate > 0.5:  # High binning rate
-                    tag_color = "poor"
-                elif quality_score > 1.0:
-                    tag_color = "excellent"
-                elif quality_score > 0.0:
-                    tag_color = "good"
-                else:
-                    tag_color = "poor"
-                
-                # Insert item with enhanced data
-                self.word_tree.insert('', tk.END, values=(
-                    word,
-                    data['active_frequency'],
-                    f"{data['average_tier']:.2f}",
-                    data['binned_frequency'],
-                    f"{data['binning_rate']:.1%}",
-                    f"{data['quality_indicator']:.2f}",
-                    example_text
-                ), tags=(word, tag_color))
+                except Exception as e:
+                    print(f"Error processing word '{word}': {e}")
+                    # Add error entry for this word
+                    self.word_tree.insert('', tk.END, values=(
+                        word, "Error", "Error", "Error", "Error", "Error", f"Error: {str(e)}"
+                    ), tags=(word, "error"))
             
             # Configure color tags with enhanced color coding
             self.word_tree.tag_configure('excellent', foreground=Colors.TEXT_SUCCESS)
             self.word_tree.tag_configure('good', foreground=Colors.TEXT_PRIMARY)
             self.word_tree.tag_configure('poor', foreground=Colors.TEXT_WARNING)
             self.word_tree.tag_configure('terrible', foreground=Colors.TEXT_ERROR)
+            self.word_tree.tag_configure('error', foreground=Colors.TEXT_ERROR)
+            self.word_tree.tag_configure('placeholder', foreground=Colors.TEXT_SECONDARY)
+            
+            print(f"Successfully populated prompt analysis with {len(word_data) if word_data else 0} words")
         
         except Exception as e:
-            print(f"Error refreshing enhanced prompt analysis: {e}")
+            error_msg = f"Critical error refreshing enhanced prompt analysis: {e}"
+            print(error_msg)
+            # Show error to user
+            try:
+                messagebox.showerror("Prompt Analysis Error", f"Failed to refresh prompt analysis:\n{str(e)}")
+            except:
+                pass
+            
+            # Add error row to table
+            try:
+                self.word_tree.insert('', tk.END, values=(
+                    "CRITICAL ERROR", "Failed", "Failed", "Failed", "Failed", "Failed", str(e)
+                ))
+            except:
+                pass
     
     def sort_by_column(self, column):
         """
@@ -267,22 +337,27 @@ class PromptAnalyzerUI:
             def get_sort_key(item_data):
                 values = item_data[1]  # Get the values tuple
                 
-                if column == 'Word':
-                    return values[0].lower()  # Sort by word (case-insensitive)
-                elif column == 'Active Freq':
-                    return int(values[1])
-                elif column == 'Avg Tier':
-                    return float(values[2])
-                elif column == 'Binned Freq':
-                    return int(values[3])
-                elif column == 'Binning Rate':
-                    return float(values[4].rstrip('%'))  # Remove % and convert to float
-                elif column == 'Quality Score':
-                    return float(values[5])
-                elif column == 'Example Images':
-                    return values[6].lower()
-                else:
-                    return values[0]  # Default to word
+                try:
+                    if column == 'Word':
+                        return str(values[0]).lower()  # Sort by word (case-insensitive)
+                    elif column == 'Active Freq':
+                        return int(values[1]) if str(values[1]).isdigit() else 0
+                    elif column == 'Avg Tier':
+                        return float(values[2]) if str(values[2]).replace('.', '').replace('-', '').isdigit() else 0
+                    elif column == 'Binned Freq':
+                        return int(values[3]) if str(values[3]).isdigit() else 0
+                    elif column == 'Binning Rate':
+                        rate_str = str(values[4]).rstrip('%')
+                        return float(rate_str) if rate_str.replace('.', '').isdigit() else 0
+                    elif column == 'Quality Score':
+                        return float(values[5]) if str(values[5]).replace('.', '').replace('-', '').isdigit() else 0
+                    elif column == 'Example Images':
+                        return str(values[6]).lower()
+                    else:
+                        return str(values[0]).lower()  # Default to word
+                except (ValueError, IndexError, AttributeError) as e:
+                    print(f"Error sorting by {column}, using fallback: {e}")
+                    return str(values[0]).lower() if values else ""  # Fallback to word
             
             # Sort items
             items.sort(key=get_sort_key, reverse=self.word_sort_reverse)
@@ -307,7 +382,8 @@ class PromptAnalyzerUI:
                     self.word_tree.heading(col, text=clean_text)
         
         except Exception as e:
-            print(f"Error sorting word analysis: {e}")
+            print(f"Error sorting word analysis by {column}: {e}")
+            messagebox.showerror("Sort Error", f"Failed to sort by {column}:\n{str(e)}")
     
     def get_example_images_for_word(self, word: str) -> List[str]:
         """
@@ -326,12 +402,16 @@ class PromptAnalyzerUI:
             for image_name, stats in self.data_manager.image_stats.items():
                 prompt = stats.get('prompt', '')
                 if prompt:
-                    main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
-                    words = self.prompt_analyzer.extract_words(main_prompt)
-                    if word_lower in words:
-                        example_images.append(image_name)
-                        if len(example_images) >= 5:  # Limit for performance
-                            break
+                    try:
+                        main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
+                        words = self.prompt_analyzer.extract_words(main_prompt)
+                        if word_lower in words:
+                            example_images.append(image_name)
+                            if len(example_images) >= 5:  # Limit for performance
+                                break
+                    except Exception as e:
+                        print(f"Error processing prompt for {image_name} when finding examples for '{word}': {e}")
+                        continue
         except Exception as e:
             print(f"Error getting example images for word '{word}': {e}")
         
@@ -352,12 +432,17 @@ class PromptAnalyzerUI:
             if item:
                 # Get the word from the item's tags
                 tags = self.word_tree.item(item, 'tags')
-                if tags and self.hover_callback:
+                if tags and self.hover_callback and len(tags) > 0:
                     word = tags[0]
-                    # Find an example image for this word and display it
-                    example_images = self.get_example_images_for_word(word)
-                    if example_images:
-                        self.hover_callback(example_images[0])
+                    # Don't try to preview placeholder, error, or empty entries
+                    if word not in ["No prompt data available", "No word analysis data", "CRITICAL ERROR"] and word.strip():
+                        # Find an example image for this word and display it
+                        try:
+                            example_images = self.get_example_images_for_word(word)
+                            if example_images:
+                                self.hover_callback(example_images[0])
+                        except Exception as e:
+                            print(f"Error showing hover preview for word '{word}': {e}")
         except Exception as e:
             print(f"Error in tree hover: {e}")
     
@@ -381,6 +466,7 @@ class PromptAnalyzerUI:
                 self.export_callback()
             except Exception as e:
                 print(f"Error in export: {e}")
+                messagebox.showerror("Export Error", f"Failed to export word analysis:\n{str(e)}")
     
     def set_hover_callback(self, callback: Callable[[str], None]):
         """
@@ -445,7 +531,7 @@ class PromptAnalyzerUI:
                 'total_words': total_words,
                 'search_term': search_term,
                 'sort_info': sort_info,
-                'enhanced_stats': {}
+                'enhanced_stats': {'error': str(e)}
             }
     
     def clear_search(self):
