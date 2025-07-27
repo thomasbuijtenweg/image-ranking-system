@@ -81,9 +81,19 @@ class DataManager:
             self.binned_images = set()
         return len(self.binned_images)
     
+    def has_pair_been_tested(self, img1: str, img2: str) -> bool:
+        """Check if two images have already been tested against each other."""
+        if img1 not in self.image_stats or img2 not in self.image_stats:
+            return False
+    
+        # Check if img2 is in img1's tested_against set
+        return img2 in self.image_stats[img1].get('tested_against', set())    
+    
     def record_vote(self, winner: str, loser: str) -> None:
         """Record a vote between two images with tier bounds checking."""
         self.vote_count += 1
+        self.image_stats[winner]['tested_against'].add(loser)
+        self.image_stats[loser]['tested_against'].add(winner)    
         
         # Calculate target tiers
         winner_current_tier = self.image_stats[winner].get('current_tier', 0)
@@ -131,18 +141,23 @@ class DataManager:
             print(f"Loser {loser} hit tier bound: {loser_reason}")
     
     def save_to_file(self, filename: str) -> bool:
-        """Save all ranking data including binned images."""
-        # Ensure binned_images exists
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
+        """Save all ranking data including tested pairs."""
+        # Convert sets to lists for JSON serialization
+        serializable_stats = {}
+        for img_name, stats in self.image_stats.items():
+            stats_copy = stats.copy()
+            # Convert set to list for JSON
+            if 'tested_against' in stats_copy:
+                stats_copy['tested_against'] = list(stats_copy['tested_against'])
+            serializable_stats[img_name] = stats_copy
         
         # Prepare core data
         core_data = {
             'image_folder': self.image_folder,
             'vote_count': self.vote_count,
-            'image_stats': self.image_stats,
+            'image_stats': serializable_stats,  # Use serializable version
             'metadata_cache': self.metadata_cache,
-            'binned_images': list(self.binned_images)  # Convert set to list for JSON
+            'binned_images': list(self.binned_images)
         }
         
         # Gather all settings
@@ -156,34 +171,31 @@ class DataManager:
         
         # Save to file
         return self.data_persistence.save_to_file(filename, save_data)
-    
+
     def load_from_file(self, filename: str) -> Tuple[bool, str]:
-        """Load ranking data including binned images."""
+        """Load ranking data including tested pairs."""
         # Load data from file
         success, data, error_msg = self.data_persistence.load_from_file(filename)
         if not success:
             return False, error_msg
-    
+        
         # Validate and fix data
         data = self.data_persistence.validate_and_fix_data(data)
         
-        # Load data directly (backward compatible)
-        self.image_folder = data.get('image_folder', '')
-        self.vote_count = data.get('vote_count', 0)
-        self.image_stats = data.get('image_stats', {})
-        self.metadata_cache = data.get('metadata_cache', {})
+        # Extract core data
+        core_data = self.data_persistence.extract_core_data(data)
+        self.image_folder = core_data['image_folder']
+        self.vote_count = core_data['vote_count']
+        self.image_stats = core_data['image_stats']
+        self.metadata_cache = core_data['metadata_cache']
+        self.binned_images = core_data['binned_images']
         
-        # Handle binned_images with backward compatibility
-        if 'binned_images' in data:
-            binned_list = data['binned_images']
-            if isinstance(binned_list, list):
-                self.binned_images = set(binned_list)
-            else:
-                self.binned_images = set()
-            print(f"Loaded {len(self.binned_images)} binned images from save file")
-        else:
-            self.binned_images = set()
-            print("Save file has no binning data - starting with empty binned images set")
+        # Convert tested_against lists back to sets
+        for img_name, stats in self.image_stats.items():
+            if 'tested_against' in stats and isinstance(stats['tested_against'], list):
+                stats['tested_against'] = set(stats['tested_against'])
+            elif 'tested_against' not in stats:
+                stats['tested_against'] = set()  # Add missing field for old saves
         
         # Load other settings
         self.weight_manager.load_from_data(data)
@@ -193,12 +205,41 @@ class DataManager:
         # Update existing images with strategic timing
         self._update_existing_images_with_strategic_timing()
         
-        # Initialize all image stats
+        # Initialize all image stats (ensures tested_against field exists)
         for image_filename in self.image_stats:
             self.initialize_image_stats(image_filename)
         
         return True, ""
-    
+    def get_pair_stats(self) -> Dict[str, Any]:
+        """Get statistics about tested pairs."""
+        total_pairs_tested = 0
+        total_possible_pairs = 0
+        
+        active_images = self.get_active_images()
+        total_possible_pairs = len(active_images) * (len(active_images) - 1) // 2
+        
+        # Count unique tested pairs
+        tested_pairs = set()
+        for img_name, stats in self.image_stats.items():
+            if not self.is_image_binned(img_name):  # Only count active images
+                tested_against = stats.get('tested_against', set())
+                for other_img in tested_against:
+                    if not self.is_image_binned(other_img):  # Only count active pairs
+                        # Add normalized pair (sorted order to avoid duplicates)
+                        pair = tuple(sorted([img_name, other_img]))
+                        tested_pairs.add(pair)
+        
+        total_pairs_tested = len(tested_pairs)
+        
+        coverage_percentage = (total_pairs_tested / max(total_possible_pairs, 1)) * 100
+        
+        return {
+            'total_pairs_tested': total_pairs_tested,
+            'total_possible_pairs': total_possible_pairs,
+            'coverage_percentage': coverage_percentage,
+            'untested_pairs_remaining': total_possible_pairs - total_pairs_tested
+        }
+
     def bin_image(self, image_name: str) -> bool:
         """Mark an image as binned and remove it from active ranking."""
         if not hasattr(self, 'binned_images'):
@@ -364,7 +405,8 @@ class DataManager:
                 'last_voted': strategic_last_voted,
                 'matchup_history': [],
                 'prompt': None,
-                'display_metadata': None
+                'display_metadata': None,
+                'tested_against': set()
             }
         else:
             # Ensure required fields exist
@@ -377,7 +419,8 @@ class DataManager:
                 'last_voted': -1,
                 'matchup_history': [],
                 'prompt': None,
-                'display_metadata': None
+                'display_metadata': None,
+                'tested_against': set()
             }
             
             for field, default_value in required_fields.items():
@@ -466,7 +509,7 @@ class DataManager:
                     cache_entry['last_modified'] = current_mtime
         except OSError:
             pass
-    
+
     def restore_metadata_from_cache(self, image_filename: str) -> None:
         """Restore metadata from cache if available and valid."""
         if image_filename not in self.metadata_cache:

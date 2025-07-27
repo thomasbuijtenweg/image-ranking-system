@@ -18,9 +18,9 @@ class RankingAlgorithm:
         self.confidence_calculator = ConfidenceCalculator(data_manager)
     
     def select_next_pair(self, available_images: List[str], 
-                        exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
-        """Select next pair using tier overflow and confidence-based selection."""
-        
+                    exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
+        """Select next pair using tier overflow and confidence-based selection, avoiding tested pairs."""
+    
         # Filter out binned images
         active_images = [img for img in available_images 
                         if not self.data_manager.is_image_binned(img)]
@@ -40,21 +40,39 @@ class RankingAlgorithm:
         
         # Get images in selected tier
         tier_images = [img for img in active_images 
-                       if self.data_manager.get_image_stats(img).get('current_tier', 0) == selected_tier]
+                    if self.data_manager.get_image_stats(img).get('current_tier', 0) == selected_tier]
         
         if len(tier_images) < 2:
             return self._fallback_random_selection(active_images, exclude_pair)
         
-        # Select left image (lowest confidence)
-        left_image = self._select_lowest_confidence_image(selected_tier, tier_images)
+        # Try to find an untested pair from this tier
+        max_attempts = min(50, len(tier_images) * (len(tier_images) - 1) // 2)
         
-        # Select right image (high confidence + low recency, excluding left)
-        right_image = self._select_high_confidence_low_recency_image(
-            selected_tier, tier_images, left_image, exclude_pair)
-        
-        if left_image and right_image and left_image != right_image:
-            return left_image, right_image
-        
+        for attempt in range(max_attempts):
+            # Select left image (lowest confidence)
+            left_image = self._select_lowest_confidence_image(selected_tier, tier_images)
+            
+            # Select right image (high confidence + low recency, excluding left)
+            right_image = self._select_high_confidence_low_recency_image(
+                selected_tier, tier_images, left_image, exclude_pair)
+            
+            if left_image and right_image and left_image != right_image:
+                # NEW: Check if this pair has already been tested
+                if not self.data_manager.has_pair_been_tested(left_image, right_image):
+                    # Also check exclude_pair
+                    if not exclude_pair or {left_image, right_image} != set(exclude_pair):
+                        return left_image, right_image
+                
+                # If this pair was already tested, remove these images from consideration and try again
+                if left_image in tier_images:
+                    tier_images.remove(left_image)
+                if right_image in tier_images:
+                    tier_images.remove(right_image)
+                
+                if len(tier_images) < 2:
+                    break
+    
+        # If we couldn't find an untested pair in overflow tier, try random
         return self._fallback_random_selection(active_images, exclude_pair)
     
     def _find_overflowing_tiers(self, active_images: List[str]) -> List[int]:
@@ -193,22 +211,40 @@ class RankingAlgorithm:
         # Return the best scoring image
         return scored_images[0][1]
     
-    def _fallback_random_selection(self, active_images: List[str], exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
-        """Fallback to random selection when tier-based selection fails."""
+    def _fallback_random_selection(self, active_images: List[str], 
+                             exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
+        """Fallback to random selection when tier-based selection fails, avoiding tested pairs."""
         if len(active_images) < 2:
             return None, None
         
-        # Try random selection with exclusion
         exclude_set = set(exclude_pair) if exclude_pair else set()
         
-        max_attempts = 10
+        # Try to find an untested pair
+        max_attempts = min(100, len(active_images) * (len(active_images) - 1) // 2)
+        
         for _ in range(max_attempts):
             pair = random.sample(active_images, 2)
+            img1, img2 = pair
+            
+            # Skip excluded pair
+            if set(pair) == exclude_set:
+                continue
+            
+            # NEW: Check if this pair has already been tested
+            if not self.data_manager.has_pair_been_tested(img1, img2):
+                return img1, img2
+        
+        # If we can't find any untested pairs, return any valid pair
+        # This should be very rare - only happens when most pairs have been tested
+        for _ in range(10):
+            pair = random.sample(active_images, 2)
             if not exclude_set or set(pair) != exclude_set:
+                print(f"Warning: All pairs may have been tested, returning tested pair: {pair[0]} vs {pair[1]}")
                 return pair[0], pair[1]
         
-        # If we can't avoid exclude_pair, just return any pair
+        # Final fallback
         pair = random.sample(active_images, 2)
+        print(f"Final fallback: {pair[0]} vs {pair[1]}")
         return pair[0], pair[1]
     
     def _calculate_expected_tier_proportion(self, tier: int, total_active_images: int) -> float:
@@ -248,6 +284,13 @@ class RankingAlgorithm:
         # Get algorithm settings for explanation
         overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
         
+        # NEW: Check if this pair has been tested before
+        has_been_tested = self.data_manager.has_pair_been_tested(image1, image2)
+        pair_status = "⚠️ Previously tested" if has_been_tested else "✅ Fresh pair"
+        
+        # Get overall pair statistics
+        pair_stats = self.data_manager.get_pair_stats()
+        
         if tier1 == tier2:
             # Get detailed confidence breakdown
             breakdown1 = self.confidence_calculator.get_confidence_breakdown(image1)
@@ -255,17 +298,20 @@ class RankingAlgorithm:
             
             # Get tier size information
             tier_size = sum(1 for img in self.data_manager.image_stats.keys() 
-                          if self.data_manager.get_image_stats(img).get('current_tier', 0) == tier1)
+                        if self.data_manager.get_image_stats(img).get('current_tier', 0) == tier1
+                        and not self.data_manager.is_image_binned(img))
             
-            total_images = len(self.data_manager.image_stats)
+            total_images = len(self.data_manager.get_active_images())
             expected_proportion = self._calculate_expected_tier_proportion(tier1, total_images)
             expected_size = expected_proportion * total_images
             
             explanation = (f"Overflowing Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f}, "
-                          f"threshold {overflow_threshold:.1f}x): "
-                          f"Left image ({breakdown1['votes']} votes, confidence: {breakdown1['confidence']:.3f}) vs "
-                          f"Right image ({breakdown2['votes']} votes, confidence: {breakdown2['confidence']:.3f}, not recently voted)")
+                        f"threshold {overflow_threshold:.1f}x): "
+                        f"Left image ({breakdown1['votes']} votes, confidence: {breakdown1['confidence']:.3f}) vs "
+                        f"Right image ({breakdown2['votes']} votes, confidence: {breakdown2['confidence']:.3f}) | "
+                        f"{pair_status} | Coverage: {pair_stats['coverage_percentage']:.1f}%")
         else:
-            explanation = f"Fallback selection: Left image from Tier {tier1}, Right image from Tier {tier2}"
+            explanation = (f"Fallback selection: Left image from Tier {tier1}, Right image from Tier {tier2} | "
+                        f"{pair_status} | Coverage: {pair_stats['coverage_percentage']:.1f}%")
         
         return explanation
