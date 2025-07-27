@@ -1,4 +1,4 @@
-"""Main window for the Image Ranking System with binning support and improved error handling."""
+"""Main window for the Image Ranking System with binning support and improved error handling - FIXED."""
 
 import tkinter as tk
 from tkinter import messagebox, filedialog
@@ -31,18 +31,20 @@ class MainWindow:
         
         # Initialize core components with error handling
         try:
+            print("MainWindow: Initializing core components...")
             self.data_manager = DataManager()
             self.image_processor = ImageProcessor()
             self.ranking_algorithm = RankingAlgorithm(self.data_manager)
             self.prompt_analyzer = PromptAnalyzer(self.data_manager)
-            print("Core components initialized successfully")
+            print("MainWindow: Core components initialized successfully")
         except Exception as e:
-            print(f"Error initializing core components: {e}")
+            print(f"MainWindow: Error initializing core components: {e}")
             messagebox.showerror("Initialization Error", f"Failed to initialize core components:\n{str(e)}")
             sys.exit(1)
         
         # Initialize UI components with error handling
         try:
+            print("MainWindow: Initializing UI components...")
             self.ui_builder = UIBuilder(root)
             self.progress_tracker = ProgressTracker(root)
             self.metadata_processor = MetadataProcessor(self.data_manager, self.image_processor)
@@ -52,9 +54,9 @@ class MainWindow:
                 self.metadata_processor, 
                 self.progress_tracker
             )
-            print("UI components initialized successfully")
+            print("MainWindow: UI components initialized successfully")
         except Exception as e:
-            print(f"Error initializing UI components: {e}")
+            print(f"MainWindow: Error initializing UI components: {e}")
             messagebox.showerror("UI Initialization Error", f"Failed to initialize UI components:\n{str(e)}")
             sys.exit(1)
         
@@ -70,6 +72,7 @@ class MainWindow:
     def _setup_application(self) -> None:
         """Setup the complete application with comprehensive error handling."""
         try:
+            print("MainWindow: Starting application setup...")
             self.ui_builder.setup_window_properties()
             
             ui_refs = self.ui_builder.build_main_ui()
@@ -84,6 +87,7 @@ class MainWindow:
             }
             self.ui_builder.create_control_buttons(ui_refs['top_frame'], button_callbacks)
             
+            print("MainWindow: Creating image display controller...")
             self.image_display = ImageDisplayController(
                 self.root, 
                 self.data_manager, 
@@ -93,7 +97,9 @@ class MainWindow:
             
             self.image_display.create_image_frames(ui_refs['main_frame'])
             self.image_display.set_ranking_algorithm(self.ranking_algorithm)
+            print("MainWindow: Image display controller created successfully")
             
+            print("MainWindow: Creating voting controller...")
             self.voting_controller = VotingController(
                 self.root,
                 self.data_manager,
@@ -104,8 +110,10 @@ class MainWindow:
             
             left_frame, right_frame = self.image_display.get_frames()
             self.voting_controller.create_vote_buttons(left_frame, right_frame)
+            print("MainWindow: Voting controller created successfully")
             
-            # Set cross-references for binning functionality
+            # FIXED: Set cross-references for binning functionality BEFORE any other operations
+            print("MainWindow: Setting up cross-references...")
             self.folder_manager.set_voting_controller_reference(self.voting_controller)
             
             self.folder_manager.set_ui_references(ui_refs['folder_label'], ui_refs['status_bar'])
@@ -113,13 +121,16 @@ class MainWindow:
             
             self.folder_manager.set_load_complete_callback(self._on_images_loaded)
             self.voting_controller.set_vote_callback(self._on_vote_cast)
+            print("MainWindow: Cross-references set successfully")
             
+            print("MainWindow: Setting up keyboard shortcuts...")
             self.voting_controller.setup_keyboard_shortcuts()
             self._setup_additional_shortcuts()
+            print("MainWindow: Keyboard shortcuts set up successfully")
             
             self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
             
-            print("Application setup completed successfully")
+            print("MainWindow: Application setup completed successfully")
             
         except Exception as e:
             error_msg = f"Critical error during application setup: {e}"
@@ -146,14 +157,15 @@ class MainWindow:
             for key in KeyBindings.SETTINGS:
                 self.root.bind(key, lambda e: self.show_settings())
             
-            print("Keyboard shortcuts setup successfully")
+            print("MainWindow: Keyboard shortcuts setup successfully")
         except Exception as e:
-            print(f"Error setting up keyboard shortcuts: {e}")
+            print(f"MainWindow: Error setting up keyboard shortcuts: {e}")
             # Non-critical error, continue
     
     def _on_images_loaded(self, images: list) -> None:
         """Handle completion of image loading."""
         try:
+            print(f"MainWindow: Images loaded callback - {len(images)} images")
             ui_refs = self.ui_builder.get_ui_references()
             active_count = self.data_manager.get_active_image_count()
             binned_count = self.data_manager.get_binned_image_count()
@@ -161,11 +173,27 @@ class MainWindow:
                 text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
             )
             
+            # FIXED: Verify that image binner is properly initialized
+            binner_status = ""
+            if self.voting_controller and hasattr(self.voting_controller, 'image_binner'):
+                if self.voting_controller.image_binner:
+                    binner_status = " | Binning: Ready"
+                else:
+                    binner_status = " | Binning: Not initialized"
+                    print("MainWindow: WARNING - Image binner not initialized after loading images")
+            else:
+                binner_status = " | Binning: Unavailable"
+                print("MainWindow: WARNING - Voting controller or image binner attribute missing")
+            
+            if 'status_bar' in ui_refs and ui_refs['status_bar']:
+                current_text = ui_refs['status_bar'].cget('text')
+                ui_refs['status_bar'].config(text=current_text + binner_status)
+            
             self.voting_controller.show_next_pair()
             
-            print(f"Successfully loaded {len(images)} images (Active: {active_count}, Binned: {binned_count})")
+            print(f"MainWindow: Successfully loaded {len(images)} images (Active: {active_count}, Binned: {binned_count}){binner_status}")
         except Exception as e:
-            print(f"Error handling image load completion: {e}")
+            print(f"MainWindow: Error handling image load completion: {e}")
             messagebox.showerror("Load Error", f"Error after loading images:\n{str(e)}")
     
     def _on_vote_cast(self, winner: str, loser: str) -> None:
@@ -175,7 +203,7 @@ class MainWindow:
             if self.stats_window and hasattr(self.stats_window, 'refresh_stats'):
                 self.stats_window.refresh_stats()
         except Exception as e:
-            print(f"Error handling vote cast: {e}")
+            print(f"MainWindow: Error handling vote cast: {e}")
             # Non-critical error, continue
     
     def save_data(self) -> None:
@@ -194,11 +222,19 @@ class MainWindow:
                 if self.data_manager.save_to_file(filename):
                     active_count = self.data_manager.get_active_image_count()
                     binned_count = self.data_manager.get_binned_image_count()
-                    messagebox.showinfo("Success", f"Data saved to {filename}\n\nSaved {active_count} active images and {binned_count} binned images.")
+                    
+                    # FIXED: Include binning status in save message
+                    binner_status = ""
+                    if self.voting_controller and hasattr(self.voting_controller, 'image_binner') and self.voting_controller.image_binner:
+                        binner_status = "\n\nBinning functionality is active and will be restored when loading this save."
+                    else:
+                        binner_status = "\n\nNote: Binning functionality was not active when saving."
+                    
+                    messagebox.showinfo("Success", f"Data saved to {filename}\n\nSaved {active_count} active images and {binned_count} binned images.{binner_status}")
                 else:
                     messagebox.showerror("Error", "Failed to save data")
         except Exception as e:
-            print(f"Error saving data: {e}")
+            print(f"MainWindow: Error saving data: {e}")
             messagebox.showerror("Save Error", f"Failed to save data:\n{str(e)}")
     
     def load_data(self) -> None:
@@ -209,8 +245,15 @@ class MainWindow:
             )
             
             if filename:
+                print(f"MainWindow: Loading data from {filename}")
                 self.image_display.clear_images()
                 self.voting_controller.reset_voting_state()
+                
+                # FIXED: Clear any existing image binner before loading
+                if self.voting_controller:
+                    self.voting_controller.image_binner = None
+                    self.voting_controller.image_folder_path = None
+                    print("MainWindow: Cleared existing image binner before loading")
                 
                 if self.folder_manager.load_from_file(filename):
                     ui_refs = self.ui_builder.get_ui_references()
@@ -219,8 +262,11 @@ class MainWindow:
                     ui_refs['stats_label'].config(
                         text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
                     )
+                    print(f"MainWindow: Data loaded successfully")
+                else:
+                    print(f"MainWindow: Failed to load data from {filename}")
         except Exception as e:
-            print(f"Error loading data: {e}")
+            print(f"MainWindow: Error loading data: {e}")
             messagebox.showerror("Load Error", f"Failed to load data:\n{str(e)}")
     
     def show_detailed_stats(self) -> None:
@@ -231,16 +277,16 @@ class MainWindow:
                 return
             
             if self.stats_window is None:
-                print("Creating new stats window...")
+                print("MainWindow: Creating new stats window...")
                 self.stats_window = StatsWindow(
                     self.root, 
                     self.data_manager, 
                     self.ranking_algorithm, 
                     self.prompt_analyzer
                 )
-                print("Stats window created successfully")
+                print("MainWindow: Stats window created successfully")
             else:
-                print("Showing existing stats window...")
+                print("MainWindow: Showing existing stats window...")
                 self.stats_window.show()
         except Exception as e:
             error_msg = f"Error showing statistics window: {e}"
@@ -265,19 +311,19 @@ class MainWindow:
                                   "Prompt analysis requires images with embedded prompt metadata.")
                 return
             
-            print(f"Found {prompt_count} images with prompts")
+            print(f"MainWindow: Found {prompt_count} images with prompts")
             
             if self.stats_window is None:
-                print("Creating new stats window for prompt analysis...")
+                print("MainWindow: Creating new stats window for prompt analysis...")
                 self.stats_window = StatsWindow(
                     self.root, 
                     self.data_manager, 
                     self.ranking_algorithm, 
                     self.prompt_analyzer
                 )
-                print("Stats window created successfully")
+                print("MainWindow: Stats window created successfully")
             else:
-                print("Showing existing stats window...")
+                print("MainWindow: Showing existing stats window...")
                 self.stats_window.show()
                 
             # Focus on prompt analysis tab
@@ -309,7 +355,7 @@ class MainWindow:
     def on_closing(self) -> None:
         """Handle application closing with cleanup and error handling."""
         try:
-            print("Cleaning up application...")
+            print("MainWindow: Cleaning up application...")
             
             self.metadata_processor.cleanup()
             self.progress_tracker.cleanup()
@@ -324,15 +370,15 @@ class MainWindow:
             
             self.image_processor.cleanup_resources()
             
-            print("Cleanup completed successfully")
+            print("MainWindow: Cleanup completed successfully")
             
         except Exception as e:
-            print(f"Error during cleanup: {e}")
+            print(f"MainWindow: Error during cleanup: {e}")
             # Continue with shutdown even if cleanup fails
         
         try:
             self.root.destroy()
         except Exception as e:
-            print(f"Error destroying root window: {e}")
+            print(f"MainWindow: Error destroying root window: {e}")
             # Force exit if normal destroy fails
             sys.exit(0)
