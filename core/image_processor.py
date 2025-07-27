@@ -9,6 +9,7 @@ import threading
 
 from config import Defaults
 from core.metadata_extractor import MetadataExtractor
+from core.image_binner import ImageBinner
 
 
 class ImageProcessor:
@@ -20,8 +21,8 @@ class ImageProcessor:
         self._file_cache = {}
         self._cache_lock = threading.Lock()
     
-    def get_image_files(self, folder_path: str, use_cache: bool = True) -> List[str]:
-        """Get all supported image files from a folder."""
+    def get_image_files(self, folder_path: str, exclude_bin_folder: bool = True, use_cache: bool = True) -> List[str]:
+        """Get all supported image files from a folder, optionally excluding Bin folder."""
         if not os.path.exists(folder_path):
             return []
         
@@ -37,7 +38,7 @@ class ImageProcessor:
                     except OSError:
                         pass
         
-        image_files = self._scan_folder_optimized(folder_path)
+        image_files = self._scan_folder_optimized(folder_path, exclude_bin_folder)
         
         if use_cache:
             with self._cache_lock:
@@ -52,14 +53,17 @@ class ImageProcessor:
         
         return image_files
     
-    def _scan_folder_optimized(self, folder_path: str) -> List[str]:
-        """Optimized folder scanning with better performance."""
+    def _scan_folder_optimized(self, folder_path: str, exclude_bin_folder: bool = True) -> List[str]:
+        """Optimized folder scanning with optional Bin folder exclusion."""
         image_files = []
         extensions_lower = set(ext.lower() for ext in self.supported_extensions)
         
         try:
             for root, dirs, files in os.walk(folder_path, followlinks=False):
+                # Skip hidden directories and optionally the Bin folder
                 dirs[:] = [d for d in dirs if not d.startswith('.')]
+                if exclude_bin_folder:
+                    dirs[:] = [d for d in dirs if d.lower() != 'bin']
                 
                 batch_size = 1000
                 for i in range(0, len(files), batch_size):
@@ -107,6 +111,34 @@ class ImageProcessor:
         except Exception as e:
             print(f"Error loading image {image_path}: {e}")
             return None
+    
+    def get_binned_image_files(self, folder_path: str) -> List[str]:
+        """Get image files from the Bin folder for word analysis."""
+        bin_folder = os.path.join(folder_path, "Bin")
+        if not os.path.exists(bin_folder):
+            return []
+        
+        return self._scan_single_folder(bin_folder)
+    
+    def _scan_single_folder(self, folder_path: str) -> List[str]:
+        """Scan a single folder for image files."""
+        image_files = []
+        extensions_lower = set(ext.lower() for ext in self.supported_extensions)
+        
+        try:
+            for file in os.listdir(folder_path):
+                if file.startswith('.'):
+                    continue
+                
+                file_lower = file.lower()
+                if any(file_lower.endswith(ext) for ext in extensions_lower):
+                    image_files.append(file)
+            
+            return sorted(image_files)
+            
+        except OSError as e:
+            print(f"Error scanning folder {folder_path}: {e}")
+            return []
     
     def extract_prompt_from_image(self, image_path: str) -> Optional[str]:
         """Extract AI generation prompt from image metadata."""

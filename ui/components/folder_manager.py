@@ -1,4 +1,4 @@
-"""Folder manager for the Image Ranking System."""
+"""Folder manager for the Image Ranking System with binning support."""
 
 import os
 import time
@@ -20,6 +20,9 @@ class FolderManager:
         self.on_load_complete_callback = None
         self.on_progress_callback = None
         
+        # Reference to voting controller for initialization
+        self.voting_controller = None
+        
         self.metadata_processor.set_progress_callback(self._on_metadata_progress)
         self.metadata_processor.set_complete_callback(self._on_metadata_complete)
         
@@ -38,6 +41,10 @@ class FolderManager:
         """Set callback for progress updates."""
         self.on_progress_callback = callback
     
+    def set_voting_controller_reference(self, voting_controller) -> None:
+        """Set reference to voting controller for initialization."""
+        self.voting_controller = voting_controller
+    
     def select_folder(self) -> bool:
         """Handle folder selection for image loading."""
         folder = filedialog.askdirectory(title="Select folder containing images (includes subfolders)")
@@ -53,7 +60,7 @@ class FolderManager:
             return
         
         start_time = time.time()
-        images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        images = self.image_processor.get_image_files(self.data_manager.image_folder, exclude_bin_folder=True)
         scan_time = time.time() - start_time
         
         if not images:
@@ -75,8 +82,16 @@ class FolderManager:
         
         self.metadata_processor.start_background_extraction(images)
         
+        # Initialize image binner for voting controller
+        if self.voting_controller:
+            self.voting_controller.set_image_folder(self.data_manager.image_folder)
+        
         if self.status_bar:
-            self.status_bar.config(text=f"Loaded {len(images)} images. All images initialized at tier 0 with strategic vote timing. Metadata extraction running in background. Ready to vote!")
+            active_count = self.data_manager.get_active_image_count()
+            binned_count = self.data_manager.get_binned_image_count()
+            self.status_bar.config(
+                text=f"Loaded {len(images)} images. Active: {active_count}, Binned: {binned_count}. Ready to vote! (↓ to bin loser)"
+            )
         
         if self.on_load_complete_callback:
             self.on_load_complete_callback(images)
@@ -110,7 +125,9 @@ class FolderManager:
     def _on_metadata_complete(self, total_processed: int) -> None:
         """Handle metadata extraction completion."""
         if self.status_bar:
-            final_text = f"Metadata extraction complete for {total_processed} images. Ready to vote!"
+            active_count = self.data_manager.get_active_image_count()
+            binned_count = self.data_manager.get_binned_image_count()
+            final_text = f"Metadata extraction complete for {total_processed} images. Active: {active_count}, Binned: {binned_count}. Ready to vote! (↓ to bin loser)"
             self.status_bar.config(text=final_text)
         
         print(f"Background metadata extraction completed for {total_processed} images")
@@ -139,7 +156,12 @@ class FolderManager:
             else:
                 weights_message = "\n\nUsing same weights for both left and right selection."
             
-            messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}")
+            # Include binning information in success message
+            active_count = self.data_manager.get_active_image_count()
+            binned_count = self.data_manager.get_binned_image_count()
+            binning_message = f"\n\nLoaded {active_count} active images and {binned_count} binned images."
+            
+            messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}{binning_message}")
             return True
         else:
             messagebox.showerror("Error", f"Could not load data: {error_msg}")
@@ -158,7 +180,7 @@ class FolderManager:
         if not self.data_manager.image_folder:
             return 0
         
-        images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        images = self.image_processor.get_image_files(self.data_manager.image_folder, exclude_bin_folder=True)
         return len(images)
     
     def cleanup(self) -> None:
