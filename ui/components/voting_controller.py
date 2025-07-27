@@ -1,4 +1,4 @@
-"""Voting controller for the Image Ranking System with binning support."""
+"""Voting controller for the Image Ranking System with binning support - FIXED."""
 
 import tkinter as tk
 from tkinter import messagebox
@@ -12,6 +12,7 @@ class VotingController:
     """Handles voting logic and pair management for the main interface."""
     
     def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm, image_processor, image_display):
+        print("VotingController: Initializing...")
         self.parent = parent
         self.data_manager = data_manager
         self.ranking_algorithm = ranking_algorithm
@@ -34,9 +35,12 @@ class VotingController:
         
         # Image binner - will be initialized when folder is set
         self.image_binner = None
+        self.image_folder_path = None  # Track the folder path for debugging
+        print("VotingController: Initialization complete")
     
     def create_vote_buttons(self, left_frame: tk.Frame, right_frame: tk.Frame) -> None:
         """Create vote buttons for both sides."""
+        print("VotingController: Creating vote buttons...")
         self.left_vote_button = tk.Button(
             left_frame, 
             text="Vote for this image (←)", 
@@ -67,11 +71,14 @@ class VotingController:
             lambda: self.vote('left'),
             lambda: self.vote('right')
         )
+        print("VotingController: Vote buttons created successfully")
     
     def set_ui_references(self, status_bar: tk.Label, stats_label: tk.Label) -> None:
         """Set references to UI elements that need to be updated."""
+        print("VotingController: Setting UI references...")
         self.status_bar = status_bar
         self.stats_label = stats_label
+        print("VotingController: UI references set")
     
     def set_vote_callback(self, callback) -> None:
         """Set callback function to be called after each vote."""
@@ -79,22 +86,56 @@ class VotingController:
     
     def set_image_folder(self, folder_path: str) -> None:
         """Set the image folder and initialize the binner."""
-        self.image_binner = ImageBinner(folder_path)
+        print(f"VotingController: Setting image folder to: {folder_path}")
+        try:
+            self.image_folder_path = folder_path
+            self.image_binner = ImageBinner(folder_path)
+            print(f"VotingController: ImageBinner initialized successfully for: {folder_path}")
+            
+            # Verify the binner is working
+            if self.image_binner.ensure_bin_folder_exists():
+                print(f"VotingController: Bin folder verified/created at: {self.image_binner.bin_folder}")
+            else:
+                print(f"VotingController: WARNING - Could not create/verify bin folder")
+                
+        except Exception as e:
+            print(f"VotingController: ERROR initializing ImageBinner: {e}")
+            self.image_binner = None
+            self.image_folder_path = None
+            raise e
+    
+    def _check_binner_ready(self) -> bool:
+        """Check if the image binner is ready to use."""
+        if not self.image_binner:
+            print("VotingController: ERROR - Image binner not initialized")
+            print(f"VotingController: DEBUG - image_folder_path: {self.image_folder_path}")
+            print(f"VotingController: DEBUG - data_manager.image_folder: {self.data_manager.image_folder}")
+            
+            if self.status_bar:
+                self.status_bar.config(text="Error: Image binner not initialized - binning disabled")
+            return False
+        
+        if not self.image_folder_path:
+            print("VotingController: ERROR - No image folder path set")
+            if self.status_bar:
+                self.status_bar.config(text="Error: No image folder set - binning disabled")
+            return False
+        
+        return True
     
     def bin_current_loser(self) -> None:
         """
         Bin an image after voting. Shows dialog to choose winner, then bins the loser.
         This is called by the down arrow key.
         """
+        print("VotingController: prepare_to_bin_next_loser called")
+        
         if not self.current_pair[0] or not self.current_pair[1]:
             if self.status_bar:
                 self.status_bar.config(text="No images available to vote on")
             return
         
-        if not self.image_binner:
-            print("Error: Image binner not initialized")
-            if self.status_bar:
-                self.status_bar.config(text="Error: Image binner not initialized")
+        if not self._check_binner_ready():
             return
         
         # Create a dialog to choose the winner
@@ -219,15 +260,14 @@ class VotingController:
         """
         Bin the loser from the last vote. This can be called after a normal vote.
         """
+        print("VotingController: bin_last_loser called")
+        
         if not self.last_vote_result:
             if self.status_bar:
                 self.status_bar.config(text="No recent vote to bin from")
             return
         
-        if not self.image_binner:
-            print("Error: Image binner not initialized")
-            if self.status_bar:
-                self.status_bar.config(text="Error: Image binner not initialized")
+        if not self._check_binner_ready():
             return
         
         winner, loser = self.last_vote_result
@@ -291,6 +331,7 @@ class VotingController:
             return
         
         self.current_pair = (img1, img2)
+        print(f"VotingController: Showing new pair: {img1} vs {img2}")
         
         self.image_display.display_image(img1, 'left')
         self.image_display.display_image(img2, 'right')
@@ -323,6 +364,8 @@ class VotingController:
     
     def vote(self, side: str) -> None:
         """Process a vote for the specified side."""
+        print(f"VotingController: Vote called for side: {side}")
+        
         if not self.current_pair[0] or not self.current_pair[1]:
             return
         
@@ -333,10 +376,13 @@ class VotingController:
         winner = self.current_pair[0] if side == 'left' else self.current_pair[1]
         loser = self.current_pair[1] if side == 'left' else self.current_pair[0]
         
+        print(f"VotingController: Winner: {winner}, Loser: {loser}")
+        
         self.data_manager.record_vote(winner, loser)
         
         # Store vote result for potential binning
         self.last_vote_result = (winner, loser)
+        print("VotingController: Vote recorded and stored for potential binning")
         
         if self.stats_label:
             active_count = self.data_manager.get_active_image_count()
@@ -364,24 +410,32 @@ class VotingController:
     
     def setup_keyboard_shortcuts(self) -> None:
         """Setup keyboard shortcuts for voting and binning."""
+        print("VotingController: Setting up keyboard shortcuts...")
         from config import KeyBindings
         
         for key in KeyBindings.VOTE_LEFT:
             self.parent.bind(key, lambda e: self.vote('left') if self.left_vote_button and self.left_vote_button['state'] == tk.NORMAL else None)
+            print(f"VotingController: Bound key {key} to vote left")
         
         for key in KeyBindings.VOTE_RIGHT:
             self.parent.bind(key, lambda e: self.vote('right') if self.right_vote_button and self.right_vote_button['state'] == tk.NORMAL else None)
+            print(f"VotingController: Bound key {key} to vote right")
         
         # Binning shortcuts
         for key in KeyBindings.BIN_LOSER:
             self.parent.bind(key, lambda e: self.bin_current_loser() if self.left_vote_button and self.left_vote_button['state'] == tk.NORMAL else None)
+            print(f"VotingController: Bound key {key} to prepare_to_bin_next_loser")
         
-        # Optional: Add a key to bin the last loser (e.g., 'b' key)
-        self.parent.bind('<b>', lambda e: self.bin_last_loser())
-        self.parent.bind('<B>', lambda e: self.bin_last_loser())
+        # Bin last loser shortcuts
+        for key in KeyBindings.BIN_LAST_LOSER:
+            self.parent.bind(key, lambda e: self.bin_last_loser())
+        print("VotingController: Bound B/b keys to bin_last_loser")
+        
+        print("VotingController: Keyboard shortcuts setup complete")
     
     def reset_voting_state(self) -> None:
         """Reset voting state when loading new images."""
+        print("VotingController: Resetting voting state...")
         self.current_pair = (None, None)
         self.next_pair = (None, None)
         self.previous_pair = (None, None)
@@ -394,6 +448,8 @@ class VotingController:
         
         if self.status_bar:
             self.status_bar.config(text="Select a folder to begin")
+        
+        print("VotingController: Voting state reset complete")
     
     def cleanup(self) -> None:
         """Clean up resources."""

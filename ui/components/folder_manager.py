@@ -1,4 +1,4 @@
-"""Folder manager for the Image Ranking System with binning support."""
+"""Folder manager for the Image Ranking System with binning support - FIXED."""
 
 import os
 import time
@@ -44,6 +44,7 @@ class FolderManager:
     def set_voting_controller_reference(self, voting_controller) -> None:
         """Set reference to voting controller for initialization."""
         self.voting_controller = voting_controller
+        print(f"FolderManager: Voting controller reference set: {voting_controller is not None}")
     
     def select_folder(self) -> bool:
         """Handle folder selection for image loading."""
@@ -56,7 +57,11 @@ class FolderManager:
     
     def load_images(self) -> None:
         """Load images from the selected folder."""
+        print(f"FolderManager: load_images called, folder: {self.data_manager.image_folder}")
+        print(f"FolderManager: voting_controller is None: {self.voting_controller is None}")
+        
         if not self.data_manager.image_folder:
+            print("FolderManager: No image folder set")
             return
         
         start_time = time.time()
@@ -82,15 +87,27 @@ class FolderManager:
         
         self.metadata_processor.start_background_extraction(images)
         
-        # Initialize image binner for voting controller
-        if self.voting_controller:
-            self.voting_controller.set_image_folder(self.data_manager.image_folder)
+        # FIXED: Initialize image binner for voting controller with better error handling
+        if self.voting_controller is not None:
+            try:
+                print(f"FolderManager: Initializing image binner for folder: {self.data_manager.image_folder}")
+                self.voting_controller.set_image_folder(self.data_manager.image_folder)
+                print("FolderManager: Image binner initialized successfully")
+            except Exception as e:
+                print(f"FolderManager: Error initializing image binner: {e}")
+                if self.status_bar:
+                    self.status_bar.config(text=f"Warning: Image binner initialization failed: {e}")
+        else:
+            print("FolderManager: WARNING - Voting controller reference not set, cannot initialize image binner")
+            if self.status_bar:
+                self.status_bar.config(text="Warning: Voting controller not available - binning disabled")
         
         if self.status_bar:
             active_count = self.data_manager.get_active_image_count()
             binned_count = self.data_manager.get_binned_image_count()
+            binner_status = "with binning" if self.voting_controller and hasattr(self.voting_controller, 'image_binner') and self.voting_controller.image_binner else "without binning"
             self.status_bar.config(
-                text=f"Loaded {len(images)} images. Active: {active_count}, Binned: {binned_count}. Ready to vote! (↓ to bin loser)"
+                text=f"Loaded {len(images)} images. Active: {active_count}, Binned: {binned_count}. Ready to vote {binner_status}! (↓ to bin loser)"
             )
         
         if self.on_load_complete_callback:
@@ -127,7 +144,8 @@ class FolderManager:
         if self.status_bar:
             active_count = self.data_manager.get_active_image_count()
             binned_count = self.data_manager.get_binned_image_count()
-            final_text = f"Metadata extraction complete for {total_processed} images. Active: {active_count}, Binned: {binned_count}. Ready to vote! (↓ to bin loser)"
+            binner_status = "with binning" if self.voting_controller and hasattr(self.voting_controller, 'image_binner') and self.voting_controller.image_binner else "without binning"
+            final_text = f"Metadata extraction complete for {total_processed} images. Active: {active_count}, Binned: {binned_count}. Ready to vote {binner_status}! (↓ to bin loser)"
             self.status_bar.config(text=final_text)
         
         print(f"Background metadata extraction completed for {total_processed} images")
@@ -143,10 +161,17 @@ class FolderManager:
     
     def load_from_file(self, filename: str) -> bool:
         """Load ranking data from file and reload images."""
+        print(f"FolderManager: Loading from file: {filename}")
         success, error_msg = self.data_manager.load_from_file(filename)
         if success:
+            print(f"FolderManager: Data loaded successfully, image_folder: {self.data_manager.image_folder}")
+            
+            # FIXED: Always reload images after loading save data to ensure proper initialization
             if self.data_manager.image_folder:
+                print("FolderManager: Reloading images from saved folder")
                 self.load_images()
+            else:
+                print("FolderManager: No image folder in save data")
             
             left_weights = self.data_manager.get_left_weights()
             right_weights = self.data_manager.get_right_weights()
@@ -161,9 +186,15 @@ class FolderManager:
             binned_count = self.data_manager.get_binned_image_count()
             binning_message = f"\n\nLoaded {active_count} active images and {binned_count} binned images."
             
-            messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}{binning_message}")
+            # FIXED: Add binner status to success message
+            binner_status = "\n\nBinning: Available" if (self.voting_controller and 
+                                                        hasattr(self.voting_controller, 'image_binner') and 
+                                                        self.voting_controller.image_binner) else "\n\nBinning: Not available"
+            
+            messagebox.showinfo("Success", f"Data loaded from {filename}{weights_message}{binning_message}{binner_status}")
             return True
         else:
+            print(f"FolderManager: Failed to load data: {error_msg}")
             messagebox.showerror("Error", f"Could not load data: {error_msg}")
             return False
     
