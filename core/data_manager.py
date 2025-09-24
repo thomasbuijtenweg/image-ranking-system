@@ -1,4 +1,4 @@
-"""Enhanced Data Manager with intelligent tier bounds and image binning support."""
+"""Enhanced Data Manager with image binning support - tier bounds system removed."""
 
 import os
 from typing import Dict, Any, Optional, Tuple
@@ -6,17 +6,15 @@ from collections import defaultdict
 
 from config import Defaults
 from core.weight_manager import WeightManager
-from core.tier_bounds_manager import TierBoundsManager
 from core.data_persistence import DataPersistence
 from core.algorithm_settings import AlgorithmSettings
 
 
 class DataManager:
-    """Handles data persistence and ranking statistics with intelligent tier bounds and binning."""
+    """Handles data persistence and ranking statistics with image binning."""
     
     def __init__(self):
         self.weight_manager = WeightManager()
-        self.tier_bounds_manager = TierBoundsManager()
         self.data_persistence = DataPersistence()
         self.algorithm_settings = AlgorithmSettings()
         self.reset_data()
@@ -29,7 +27,6 @@ class DataManager:
         self.metadata_cache = {}
         self.binned_images = set()  # Track binned image filenames
         self.weight_manager.reset_to_defaults()
-        self.tier_bounds_manager.reset_to_defaults()
         self.algorithm_settings.reset_to_defaults()
     
     def bin_image(self, image_name: str) -> bool:
@@ -90,34 +87,24 @@ class DataManager:
         return img2 in self.image_stats[img1].get('tested_against', set())    
     
     def record_vote(self, winner: str, loser: str) -> None:
-        """Record a vote between two images with tier bounds checking."""
+        """Record a vote between two images."""
         self.vote_count += 1
         self.image_stats[winner]['tested_against'].add(loser)
         self.image_stats[loser]['tested_against'].add(winner)    
         
-        # Calculate target tiers
+        # Calculate target tiers (no bounds checking - tiers can move freely)
         winner_current_tier = self.image_stats[winner].get('current_tier', 0)
         loser_current_tier = self.image_stats[loser].get('current_tier', 0)
         
         winner_target_tier = winner_current_tier + 1
         loser_target_tier = loser_current_tier - 1
         
-        # Check if moves are allowed
-        winner_can_move, winner_reason = self.tier_bounds_manager.can_move_to_tier(
-            winner, winner_target_tier, self.image_stats, self.algorithm_settings.tier_distribution_std)
-        loser_can_move, loser_reason = self.tier_bounds_manager.can_move_to_tier(
-            loser, loser_target_tier, self.image_stats, self.algorithm_settings.tier_distribution_std)
-        
         # Update winner stats
         winner_stats = self.image_stats[winner]
         winner_stats['votes'] += 1
         winner_stats['wins'] += 1
-        
-        if winner_can_move:
-            winner_stats['current_tier'] = winner_target_tier
-        # If can't move, tier stays the same
-        
-        winner_stats['tier_history'].append(winner_stats['current_tier'])
+        winner_stats['current_tier'] = winner_target_tier
+        winner_stats['tier_history'].append(winner_target_tier)
         winner_stats['last_voted'] = self.vote_count
         winner_stats['matchup_history'].append((loser, True, self.vote_count))
         
@@ -125,20 +112,10 @@ class DataManager:
         loser_stats = self.image_stats[loser]
         loser_stats['votes'] += 1
         loser_stats['losses'] += 1
-        
-        if loser_can_move:
-            loser_stats['current_tier'] = loser_target_tier
-        # If can't move, tier stays the same
-        
-        loser_stats['tier_history'].append(loser_stats['current_tier'])
+        loser_stats['current_tier'] = loser_target_tier
+        loser_stats['tier_history'].append(loser_target_tier)
         loser_stats['last_voted'] = self.vote_count
         loser_stats['matchup_history'].append((winner, False, self.vote_count))
-        
-        # Log tier bound decisions if they affected the outcome
-        if not winner_can_move:
-            print(f"Winner {winner} hit tier bound: {winner_reason}")
-        if not loser_can_move:
-            print(f"Loser {loser} hit tier bound: {loser_reason}")
     
     def save_to_file(self, filename: str) -> bool:
         """Save all ranking data including tested pairs."""
@@ -163,11 +140,10 @@ class DataManager:
         # Gather all settings
         weight_data = self.weight_manager.export_to_data()
         algorithm_settings = self.algorithm_settings.export_settings()
-        tier_bounds_settings = self.tier_bounds_manager.export_settings()
         
         # Prepare complete save data
         save_data = self.data_persistence.prepare_save_data(
-            core_data, weight_data, algorithm_settings, tier_bounds_settings)
+            core_data, weight_data, algorithm_settings)
         
         # Save to file
         return self.data_persistence.save_to_file(filename, save_data)
@@ -200,7 +176,6 @@ class DataManager:
         # Load other settings
         self.weight_manager.load_from_data(data)
         self.algorithm_settings.load_settings(data)
-        self.tier_bounds_manager.load_settings(data)
         
         # Update existing images with strategic timing
         self._update_existing_images_with_strategic_timing()
@@ -210,6 +185,7 @@ class DataManager:
             self.initialize_image_stats(image_filename)
         
         return True, ""
+    
     def get_pair_stats(self) -> Dict[str, Any]:
         """Get statistics about tested pairs."""
         total_pairs_tested = 0
@@ -239,44 +215,6 @@ class DataManager:
             'coverage_percentage': coverage_percentage,
             'untested_pairs_remaining': total_possible_pairs - total_pairs_tested
         }
-
-    def bin_image(self, image_name: str) -> bool:
-        """Mark an image as binned and remove it from active ranking."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        if image_name in self.binned_images:
-            return False
-        self.binned_images.add(image_name)
-        print(f"Image '{image_name}' has been binned")
-        return True
-
-    def is_image_binned(self, image_name: str) -> bool:
-        """Check if an image is binned."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        return image_name in self.binned_images
-
-    def get_active_images(self) -> list:
-        """Get list of active (non-binned) image names."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        return [img for img in self.image_stats.keys() if img not in self.binned_images]
-
-    def get_binned_images(self) -> list:
-        """Get list of binned image names."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        return list(self.binned_images)
-
-    def get_active_image_count(self) -> int:
-        """Get count of active (non-binned) images."""
-        return len(self.get_active_images())
-
-    def get_binned_image_count(self) -> int:
-        """Get count of binned images."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        return len(self.binned_images)
     
     def get_tier_distribution(self) -> Dict[int, int]:
         """Get the distribution of ACTIVE images across tiers."""
@@ -309,8 +247,7 @@ class DataManager:
                     'total_votes': self.vote_count,
                     'avg_votes_per_image': 0,  # For backward compatibility
                     'avg_votes_per_active_image': 0,
-                    'tier_distribution': {},
-                    'tier_bounds_info': self.get_tier_bounds_info()
+                    'tier_distribution': {}
                 }
             
             total_votes = self.vote_count
@@ -344,8 +281,7 @@ class DataManager:
                 'total_votes': total_votes,
                 'avg_votes_per_image': avg_votes_per_image,  # For backward compatibility
                 'avg_votes_per_active_image': avg_votes_per_active_image,
-                'tier_distribution': self.get_tier_distribution(),
-                'tier_bounds_info': self.get_tier_bounds_info()
+                'tier_distribution': self.get_tier_distribution()
             }
             
         except Exception as e:
@@ -358,13 +294,8 @@ class DataManager:
                 'total_votes': self.vote_count,
                 'avg_votes_per_image': 0,
                 'avg_votes_per_active_image': 0,
-                'tier_distribution': {},
-                'tier_bounds_info': {}
+                'tier_distribution': {}
             }
-    
-    def get_tier_bounds_info(self) -> Dict[str, Any]:
-        """Get information about current tier bounds."""
-        return self.tier_bounds_manager.get_bounds_info(self.algorithm_settings.tier_distribution_std, self.image_stats)
     
     # Weight manager delegations
     def get_left_weights(self) -> Dict[str, float]:

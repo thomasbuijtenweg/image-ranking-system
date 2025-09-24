@@ -1,4 +1,4 @@
-"""Data persistence handler for the Image Ranking System with binning support."""
+"""Data persistence handler for the Image Ranking System with binning support - tier bounds system removed."""
 
 import json
 import os
@@ -9,7 +9,7 @@ from typing import Dict, Any, Tuple, Optional
 class DataPersistence:
     """Handles saving and loading data to/from JSON files including binned images."""
     
-    CURRENT_VERSION = '2.1'
+    CURRENT_VERSION = '2.2'
     REQUIRED_FIELDS = ['image_folder', 'vote_count', 'image_stats']
     
     def save_to_file(self, filename: str, data: Dict[str, Any]) -> bool:
@@ -95,16 +95,14 @@ class DataPersistence:
     
     def prepare_save_data(self, core_data: Dict[str, Any], 
                          weight_data: Dict[str, Any],
-                         algorithm_settings: Dict[str, Any],
-                         tier_bounds_settings: Dict[str, Any]) -> Dict[str, Any]:
+                         algorithm_settings: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Add binned_images to save data.
+        Prepare save data without tier bounds settings.
         
         Args:
             core_data: Core data (image_folder, vote_count, image_stats, metadata_cache, binned_images)
             weight_data: Weight manager export data
             algorithm_settings: Algorithm settings export
-            tier_bounds_settings: Tier bounds settings export
             
         Returns:
             Complete data dictionary ready for saving
@@ -112,7 +110,6 @@ class DataPersistence:
         save_data = core_data.copy()
         save_data.update(weight_data)
         save_data.update(algorithm_settings)
-        save_data.update(tier_bounds_settings)
         
         # Ensure binned_images is included
         if 'binned_images' not in save_data:
@@ -160,10 +157,13 @@ class DataPersistence:
         version = self.get_version(data)
         
         # Add any version-specific migrations here
-        if version == '1.0':
-            # Example migration from 1.0 to 2.0
-            print(f"Migrating data from version {version} to {self.CURRENT_VERSION}")
-            # Add migration logic here if needed
+        if version in ['1.0', '2.0', '2.1']:
+            # Remove tier bounds settings if present from older versions
+            if 'tier_bounds_settings' in data:
+                del data['tier_bounds_settings']
+                print(f"Removed deprecated tier bounds settings from version {version}")
+            
+            print(f"Migrated data from version {version} to {self.CURRENT_VERSION}")
         
         return data
     

@@ -1,4 +1,4 @@
-"""Ranking algorithm for intelligent pair selection based on tier overflow and confidence."""
+"""Ranking algorithm for intelligent pair selection based on tier overflow and confidence - tier bounds system removed."""
 
 import random
 import math
@@ -57,7 +57,7 @@ class RankingAlgorithm:
                 selected_tier, tier_images, left_image, exclude_pair)
             
             if left_image and right_image and left_image != right_image:
-                # NEW: Check if this pair has already been tested
+                # Check if this pair has already been tested
                 if not self.data_manager.has_pair_been_tested(left_image, right_image):
                     # Also check exclude_pair
                     if not exclude_pair or {left_image, right_image} != set(exclude_pair):
@@ -230,7 +230,7 @@ class RankingAlgorithm:
             if set(pair) == exclude_set:
                 continue
             
-            # NEW: Check if this pair has already been tested
+            # Check if this pair has already been tested
             if not self.data_manager.has_pair_been_tested(img1, img2):
                 return img1, img2
         
@@ -284,7 +284,7 @@ class RankingAlgorithm:
         # Get algorithm settings for explanation
         overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
         
-        # NEW: Check if this pair has been tested before
+        # Check if this pair has been tested before
         has_been_tested = self.data_manager.has_pair_been_tested(image1, image2)
         pair_status = "⚠️ Previously tested" if has_been_tested else "✅ Fresh pair"
         
@@ -315,3 +315,88 @@ class RankingAlgorithm:
                         f"{pair_status} | Coverage: {pair_stats['coverage_percentage']:.1f}%")
         
         return explanation
+    
+    def calculate_all_rankings(self) -> Dict[str, List[Tuple[str, Dict[str, Any]]]]:
+        """
+        Calculate comprehensive rankings for all images.
+        
+        Returns:
+            Dictionary with different ranking types
+        """
+        try:
+            active_images = self.data_manager.get_active_images()
+            
+            if not active_images:
+                return {
+                    'current_tier': [],
+                    'win_rate': [],
+                    'confidence': [],
+                    'stability': []
+                }
+            
+            # Prepare image metrics
+            image_metrics = []
+            
+            for img_name in active_images:
+                stats = self.data_manager.get_image_stats(img_name)
+                
+                # Basic stats
+                votes = stats.get('votes', 0)
+                wins = stats.get('wins', 0)
+                current_tier = stats.get('current_tier', 0)
+                
+                # Calculated metrics
+                win_rate = wins / votes if votes > 0 else 0
+                confidence = self._calculate_image_confidence(img_name)
+                stability = self._calculate_tier_stability(img_name)
+                
+                image_metrics.append({
+                    'name': img_name,
+                    'current_tier': current_tier,
+                    'total_votes': votes,
+                    'wins': wins,
+                    'win_rate': win_rate,
+                    'confidence': confidence,
+                    'tier_stability': stability
+                })
+            
+            # Create different rankings
+            rankings = {}
+            
+            # By current tier (highest first)
+            rankings['current_tier'] = sorted(
+                [(img['name'], img) for img in image_metrics],
+                key=lambda x: x[1]['current_tier'],
+                reverse=True
+            )
+            
+            # By win rate (highest first)
+            rankings['win_rate'] = sorted(
+                [(img['name'], img) for img in image_metrics],
+                key=lambda x: x[1]['win_rate'],
+                reverse=True
+            )
+            
+            # By confidence (highest first)
+            rankings['confidence'] = sorted(
+                [(img['name'], img) for img in image_metrics],
+                key=lambda x: x[1]['confidence'],
+                reverse=True
+            )
+            
+            # By stability (lowest first - most stable)
+            rankings['stability'] = sorted(
+                [(img['name'], img) for img in image_metrics],
+                key=lambda x: x[1]['tier_stability']
+            )
+            
+            return rankings
+            
+        except Exception as e:
+            print(f"Error calculating rankings: {e}")
+            return {
+                'current_tier': [],
+                'win_rate': [],
+                'confidence': [],
+                'stability': []
+            }

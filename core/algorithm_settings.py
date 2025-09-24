@@ -1,4 +1,4 @@
-"""Algorithm settings management for the Image Ranking System."""
+"""Algorithm settings management for the Image Ranking System - tier bounds system removed."""
 
 from typing import Dict, Any
 
@@ -103,7 +103,7 @@ class AlgorithmSettings:
                 'overflow_threshold': self.overflow_threshold,
                 'min_overflow_images': self.min_overflow_images,
                 'min_votes_for_stability': self.min_votes_for_stability,
-                'algorithm_version': '2.1'
+                'algorithm_version': '2.2'
             }
         }
     
@@ -126,7 +126,7 @@ class AlgorithmSettings:
             self.set_value('min_votes_for_stability', 
                           settings.get('min_votes_for_stability', self.DEFAULT_MIN_VOTES_FOR_STABILITY))
             
-            print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.1')}")
+            print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.2')}")
         else:
             # Set defaults if no settings found
             self.reset_to_defaults()
