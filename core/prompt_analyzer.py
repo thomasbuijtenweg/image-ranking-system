@@ -1,4 +1,4 @@
-"""Prompt analysis for the Image Ranking System with binning support."""
+"""Prompt analysis for the Image Ranking System with binning support and word combination analysis."""
 
 import re
 import os
@@ -10,7 +10,7 @@ from core.data_manager import DataManager
 
 
 class PromptAnalyzer:
-    """Analyzes prompt text to find correlations between words and image tiers."""
+    """Analyzes prompt text to find correlations between words and image tiers, including word combinations."""
     
     def __init__(self, data_manager: DataManager):
         self.data_manager = data_manager
@@ -307,3 +307,236 @@ class PromptAnalyzer:
         matching_words.sort(key=lambda x: x[1]['average_tier'], reverse=True)
         
         return matching_words
+    
+    def analyze_word_combinations(self, min_pair_frequency: int = 3) -> Dict[Tuple[str, str], Dict[str, Any]]:
+        """
+        Analyze word pair combinations for synergistic/antagonistic effects.
+        
+        Args:
+            min_pair_frequency: Minimum number of occurrences for a pair to be analyzed
+            
+        Returns:
+            Dictionary mapping word pairs to their analysis data
+        """
+        # Extract all word pairs from active images
+        word_pairs = defaultdict(list)  # (word1, word2) -> [tier_values]
+        individual_performance = self.analyze_word_performance()
+        
+        for image_name, stats in self.data_manager.image_stats.items():
+            if self.data_manager.is_image_binned(image_name):
+                continue
+                
+            prompt = stats.get('prompt')
+            if not prompt:
+                continue
+                
+            words = set(self.extract_words(self.extract_main_prompt(prompt)))  # Use set to avoid duplicate pairs
+            current_tier = stats.get('current_tier', 0)
+            
+            # Generate all unique word pairs
+            word_list = list(words)
+            for i, word1 in enumerate(word_list):
+                for word2 in word_list[i+1:]:  # Avoid duplicates and self-pairs
+                    # Always store in alphabetical order for consistency
+                    pair_key = tuple(sorted([word1, word2]))
+                    word_pairs[pair_key].append(current_tier)
+        
+        # Calculate synergy/antagonism for each pair
+        pair_analysis = {}
+        
+        for pair, tier_values in word_pairs.items():
+            if len(tier_values) < min_pair_frequency:
+                continue
+                
+            word1, word2 = pair
+            
+            # Get individual performances
+            word1_perf = individual_performance.get(word1, {})
+            word2_perf = individual_performance.get(word2, {})
+            
+            word1_avg = word1_perf.get('average_tier', 0)
+            word2_avg = word2_perf.get('average_tier', 0)
+            
+            # Calculate expected performance (average of individual performances)
+            expected_performance = (word1_avg + word2_avg) / 2
+            
+            # Calculate actual performance
+            actual_performance = statistics.mean(tier_values)
+            
+            # Calculate synergy score
+            synergy_score = actual_performance - expected_performance
+            
+            # Calculate statistical significance
+            pair_std = statistics.stdev(tier_values) if len(tier_values) > 1 else 0.0
+            
+            pair_analysis[pair] = {
+                'word1': word1,
+                'word2': word2,
+                'pair_frequency': len(tier_values),
+                'actual_performance': actual_performance,
+                'expected_performance': expected_performance,
+                'synergy_score': synergy_score,
+                'synergy_type': self._classify_synergy(synergy_score, len(tier_values)),
+                'tier_values': tier_values,
+                'std_deviation': pair_std,
+                'confidence': self._calculate_pair_confidence(tier_values, synergy_score),
+                'word1_individual_perf': word1_avg,
+                'word2_individual_perf': word2_avg,
+                'word1_frequency': word1_perf.get('active_frequency', 0),
+                'word2_frequency': word2_perf.get('active_frequency', 0)
+            }
+        
+        return pair_analysis
+    
+    def _classify_synergy(self, score: float, sample_size: int) -> str:
+        """
+        Classify synergy type based on score and sample size.
+        
+        Args:
+            score: Synergy score (actual - expected performance)
+            sample_size: Number of samples for this pair
+            
+        Returns:
+            Classification string
+        """
+        # Adjust thresholds based on sample size (more conservative with fewer samples)
+        base_threshold = 0.3
+        size_factor = min(sample_size / 10.0, 1.0)  # Scale from 0.1 to 1.0
+        threshold = base_threshold * (1.5 - size_factor)  # Higher threshold for small samples
+        
+        if score > threshold:
+            return "Strong Synergy" if score > threshold * 2 else "Moderate Synergy"
+        elif score < -threshold:
+            return "Strong Antagonism" if score < -threshold * 2 else "Moderate Antagonism"
+        else:
+            return "Neutral"
+    
+    def _calculate_pair_confidence(self, tier_values: List[int], synergy_score: float) -> float:
+        """
+        Calculate confidence in the synergy measurement.
+        
+        Args:
+            tier_values: List of tier values for this pair
+            synergy_score: Calculated synergy score
+            
+        Returns:
+            Confidence score between 0.0 and 1.0
+        """
+        if len(tier_values) < 2:
+            return 0.1
+        
+        # Sample size factor (more samples = higher confidence)
+        sample_size_factor = min(len(tier_values) / 15.0, 1.0)
+        
+        # Consistency factor (lower std deviation = higher confidence)
+        std_dev = statistics.stdev(tier_values)
+        consistency_factor = 1.0 / (1.0 + std_dev)
+        
+        # Effect size factor (larger absolute synergy score = higher confidence)
+        effect_size_factor = min(abs(synergy_score) / 2.0, 1.0)
+        
+        # Combined confidence
+        confidence = (sample_size_factor + consistency_factor + effect_size_factor) / 3.0
+        
+        return min(confidence, 1.0)
+    
+    def get_combination_examples(self, word1: str, word2: str, max_examples: int = 5) -> List[str]:
+        """
+        Get example images that contain both words in the pair.
+        
+        Args:
+            word1: First word in the pair
+            word2: Second word in the pair
+            max_examples: Maximum number of examples to return
+            
+        Returns:
+            List of image filenames containing both words
+        """
+        examples = []
+        word1_lower = word1.lower()
+        word2_lower = word2.lower()
+        
+        for image_name, stats in self.data_manager.image_stats.items():
+            if self.data_manager.is_image_binned(image_name):
+                continue
+                
+            prompt = stats.get('prompt')
+            if not prompt:
+                continue
+                
+            try:
+                main_prompt = self.extract_main_prompt(prompt)
+                words = self.extract_words(main_prompt)
+                
+                if word1_lower in words and word2_lower in words:
+                    examples.append(image_name)
+                    if len(examples) >= max_examples:
+                        break
+            except Exception as e:
+                print(f"Error processing prompt for {image_name} when finding combination examples: {e}")
+                continue
+        
+        return examples
+    
+    def get_top_synergistic_pairs(self, min_frequency: int = 3, count: int = 10) -> List[Tuple[Tuple[str, str], Dict[str, Any]]]:
+        """Get the top synergistic word pairs."""
+        combinations = self.analyze_word_combinations(min_frequency)
+        
+        synergistic_pairs = [
+            (pair, data) for pair, data in combinations.items()
+            if data['synergy_score'] > 0
+        ]
+        
+        synergistic_pairs.sort(key=lambda x: x[1]['synergy_score'], reverse=True)
+        return synergistic_pairs[:count]
+    
+    def get_top_antagonistic_pairs(self, min_frequency: int = 3, count: int = 10) -> List[Tuple[Tuple[str, str], Dict[str, Any]]]:
+        """Get the top antagonistic word pairs."""
+        combinations = self.analyze_word_combinations(min_frequency)
+        
+        antagonistic_pairs = [
+            (pair, data) for pair, data in combinations.items()
+            if data['synergy_score'] < 0
+        ]
+        
+        antagonistic_pairs.sort(key=lambda x: x[1]['synergy_score'])
+        return antagonistic_pairs[:count]
+    
+    def get_combination_summary(self) -> Dict[str, Any]:
+        """Get summary statistics for word combinations."""
+        try:
+            combinations = self.analyze_word_combinations()
+            
+            if not combinations:
+                return {
+                    'total_combinations': 0,
+                    'synergistic_count': 0,
+                    'antagonistic_count': 0,
+                    'neutral_count': 0,
+                    'avg_synergy_score': 0,
+                    'strongest_synergy': None,
+                    'strongest_antagonism': None
+                }
+            
+            synergy_scores = [data['synergy_score'] for data in combinations.values()]
+            synergistic = [p for p, d in combinations.items() if d['synergy_score'] > 0.1]
+            antagonistic = [p for p, d in combinations.items() if d['synergy_score'] < -0.1]
+            neutral = [p for p, d in combinations.items() if -0.1 <= d['synergy_score'] <= 0.1]
+            
+            # Find strongest effects
+            strongest_synergy = max(combinations.items(), key=lambda x: x[1]['synergy_score'])
+            strongest_antagonism = min(combinations.items(), key=lambda x: x[1]['synergy_score'])
+            
+            return {
+                'total_combinations': len(combinations),
+                'synergistic_count': len(synergistic),
+                'antagonistic_count': len(antagonistic),
+                'neutral_count': len(neutral),
+                'avg_synergy_score': statistics.mean(synergy_scores),
+                'strongest_synergy': strongest_synergy,
+                'strongest_antagonism': strongest_antagonism
+            }
+            
+        except Exception as e:
+            print(f"Error getting combination summary: {e}")
+            return {'error': str(e)}

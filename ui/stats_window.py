@@ -1,4 +1,4 @@
-"""Statistics window for the Image Ranking System."""
+"""Statistics window for the Image Ranking System with word combination analysis."""
 
 import tkinter as tk
 from tkinter import ttk
@@ -9,11 +9,12 @@ from ui.mixins import ImagePreviewMixin
 from ui.components.chart_generator import ChartGenerator
 from ui.components.data_exporter import DataExporter
 from ui.components.prompt_analyzer_ui import PromptAnalyzerUI
+from ui.components.word_combination_analyzer_ui import WordCombinationAnalyzerUI
 from ui.components.stats_table import StatsTable
 
 
 class StatsWindow(ImagePreviewMixin):
-    """Window for displaying detailed statistics about the ranking system."""
+    """Window for displaying detailed statistics about the ranking system with combination analysis."""
     
     def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm, prompt_analyzer):
         ImagePreviewMixin.__init__(self)
@@ -29,6 +30,7 @@ class StatsWindow(ImagePreviewMixin):
         self.data_exporter = DataExporter(data_manager, prompt_analyzer, ranking_algorithm)
         self.stats_table = StatsTable(data_manager, ranking_algorithm, prompt_analyzer)
         self.prompt_analyzer_ui = PromptAnalyzerUI(data_manager, prompt_analyzer)
+        self.word_combination_ui = None  # Will be created if needed
     
     def show(self):
         """Show the statistics window."""
@@ -53,7 +55,7 @@ class StatsWindow(ImagePreviewMixin):
             self.image_processor = ImageProcessor()
             
             self.window = tk.Toplevel(self.parent)
-            self.window.title("Detailed Statistics")
+            self.window.title("Detailed Statistics & Analysis")
             self.window.geometry("1800x900")
             self.window.minsize(1200, 600)
             self.window.configure(bg=Colors.BG_PRIMARY)
@@ -82,7 +84,7 @@ class StatsWindow(ImagePreviewMixin):
             if prompt_count > 0:
                 self.create_prompt_analysis_tab(self.notebook)
             
-            print("Stats window created and populated successfully")
+            print("Stats window created and populated successfully with combination analysis")
             
         except Exception as e:
             print(f"Error creating stats window: {e}")
@@ -158,16 +160,50 @@ class StatsWindow(ImagePreviewMixin):
                     font=('Arial', 12), justify=tk.CENTER).pack(expand=True)
     
     def create_prompt_analysis_tab(self, notebook: ttk.Notebook):
-        """Create the prompt analysis tab."""
+        """Create the prompt analysis tab with sub-tabs for individual words and combinations."""
         try:
-            frame = tk.Frame(notebook, bg=Colors.BG_SECONDARY)
-            notebook.add(frame, text="Prompt Analysis")
+            # Main frame for the prompt analysis tab
+            main_frame = tk.Frame(notebook, bg=Colors.BG_SECONDARY)
+            notebook.add(main_frame, text="Prompt Analysis")
             
-            self.prompt_analyzer_ui.create_prompt_analysis_tab(frame)
+            # Create sub-notebook for different analysis types
+            sub_notebook = ttk.Notebook(main_frame)
+            sub_notebook.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
             
+            # Individual word analysis tab
+            word_frame = tk.Frame(sub_notebook, bg=Colors.BG_SECONDARY)
+            sub_notebook.add(word_frame, text="Individual Words")
+            self.prompt_analyzer_ui.create_prompt_analysis_tab(word_frame)
+            
+            # Set up individual word analysis callbacks
             self.prompt_analyzer_ui.set_hover_callback(self.display_preview_image)
             self.prompt_analyzer_ui.set_leave_callback(lambda: None)
             self.prompt_analyzer_ui.set_export_callback(self.export_word_analysis)
+            
+            # Word combination analysis tab
+            try:
+                combination_frame = tk.Frame(sub_notebook, bg=Colors.BG_SECONDARY)
+                sub_notebook.add(combination_frame, text="Word Combinations")
+                
+                # Create the combination analyzer UI
+                self.word_combination_ui = WordCombinationAnalyzerUI(self.data_manager, self.prompt_analyzer)
+                self.word_combination_ui.create_combination_analysis_tab(combination_frame)
+                
+                # Set up combination analysis callbacks
+                self.word_combination_ui.set_hover_callback(self.display_preview_image)
+                self.word_combination_ui.set_leave_callback(lambda: None)
+                self.word_combination_ui.set_export_callback(self.export_combination_analysis)
+                
+                print("Word combination analysis tab created successfully")
+                
+            except Exception as e:
+                print(f"Error creating word combination analysis tab: {e}")
+                # Create error tab instead
+                error_frame = tk.Frame(sub_notebook, bg=Colors.BG_SECONDARY)
+                sub_notebook.add(error_frame, text="Word Combinations (Error)")
+                tk.Label(error_frame, text=f"Error creating combination analysis:\n{str(e)}", 
+                        fg=Colors.TEXT_ERROR, bg=Colors.BG_SECONDARY, 
+                        font=('Arial', 12), justify=tk.CENTER).pack(expand=True, pady=50)
             
         except Exception as e:
             print(f"Error creating prompt analysis tab: {e}")
@@ -179,15 +215,24 @@ class StatsWindow(ImagePreviewMixin):
                     font=('Arial', 12), justify=tk.CENTER).pack(expand=True)
     
     def export_word_analysis(self):
-        """Export word analysis."""
+        """Export individual word analysis."""
         try:
             self.data_exporter.export_word_analysis(self.window)
         except Exception as e:
             print(f"Error exporting word analysis: {e}")
             tk.messagebox.showerror("Export Error", f"Failed to export word analysis:\n{str(e)}")
     
+    def export_combination_analysis(self):
+        """Export word combination analysis."""
+        try:
+            # Use the enhanced data exporter with combination analysis support
+            self.data_exporter.export_combination_analysis(self.window)
+        except Exception as e:
+            print(f"Error exporting combination analysis: {e}")
+            tk.messagebox.showerror("Export Error", f"Failed to export combination analysis:\n{str(e)}")
+    
     def refresh_stats(self):
-        """Refresh all statistics displays."""
+        """Refresh all statistics displays including combination analysis."""
         try:
             if hasattr(self, 'stats_table') and self.stats_table:
                 self.stats_table.refresh_table()
@@ -215,18 +260,22 @@ class StatsWindow(ImagePreviewMixin):
             
             if hasattr(self, 'prompt_analyzer_ui') and self.prompt_analyzer_ui:
                 self.prompt_analyzer_ui.refresh_analysis()
+            
+            if hasattr(self, 'word_combination_ui') and self.word_combination_ui:
+                self.word_combination_ui.refresh_combination_analysis()
                 
         except Exception as e:
             print(f"Error refreshing stats: {e}")
     
     def get_stats_summary(self):
-        """Get a summary of the current statistics."""
+        """Get a summary of the current statistics including combination analysis."""
         try:
             summary = {
                 'overall_stats': self.data_manager.get_overall_statistics(),
                 'chart_data': self.chart_generator.get_chart_data_summary() if hasattr(self, 'chart_generator') else {},
                 'table_stats': self.stats_table.get_table_stats() if hasattr(self, 'stats_table') else {},
-                'prompt_analysis': self.prompt_analyzer_ui.get_analysis_summary() if hasattr(self, 'prompt_analyzer_ui') else {}
+                'prompt_analysis': self.prompt_analyzer_ui.get_analysis_summary() if hasattr(self, 'prompt_analyzer_ui') else {},
+                'combination_analysis': self.word_combination_ui.get_analysis_summary() if hasattr(self, 'word_combination_ui') and self.word_combination_ui else {}
             }
             return summary
         except Exception as e:
@@ -234,14 +283,14 @@ class StatsWindow(ImagePreviewMixin):
             return {'error': str(e)}
     
     def export_all_data(self):
-        """Export all available data."""
+        """Export all available data including combination analysis."""
         try:
             if hasattr(self, 'data_exporter'):
                 export_options = self.data_exporter.get_export_options()
                 
                 dialog = tk.Toplevel(self.window)
                 dialog.title("Export Data")
-                dialog.geometry("400x300")
+                dialog.geometry("500x400")
                 dialog.configure(bg=Colors.BG_PRIMARY)
                 dialog.transient(self.window)
                 dialog.grab_set()
@@ -255,15 +304,29 @@ class StatsWindow(ImagePreviewMixin):
                         font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY, 
                         bg=Colors.BG_PRIMARY).pack(pady=10)
                 
+                # Create scrollable frame for export options
+                canvas = tk.Canvas(dialog, bg=Colors.BG_PRIMARY, highlightthickness=0)
+                scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+                scrollable_frame = tk.Frame(canvas, bg=Colors.BG_PRIMARY)
+                
+                canvas.configure(yscrollcommand=scrollbar.set)
+                canvas_frame = canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+                
                 for export_type, description in export_options.items():
-                    btn = tk.Button(dialog, text=description, 
+                    # All exports are now enabled
+                    btn = tk.Button(scrollable_frame, text=description, 
                                   command=lambda t=export_type: self._export_and_close(t, dialog),
                                   bg=Colors.BUTTON_INFO, fg='white', relief=tk.FLAT, 
-                                  wraplength=300, justify=tk.LEFT)
+                                  wraplength=400, justify=tk.LEFT)
                     btn.pack(pady=5, padx=20, fill=tk.X)
                 
+                scrollable_frame.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+                
+                canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=(0, 50))
+                scrollbar.pack(side="right", fill="y", pady=(0, 50))
+                
                 tk.Button(dialog, text="Cancel", command=dialog.destroy,
-                         bg=Colors.BUTTON_NEUTRAL, fg='white', relief=tk.FLAT).pack(pady=10)
+                         bg=Colors.BUTTON_NEUTRAL, fg='white', relief=tk.FLAT).pack(side=tk.BOTTOM, pady=10)
         except Exception as e:
             print(f"Error showing export dialog: {e}")
             tk.messagebox.showerror("Export Error", f"Failed to show export options:\n{str(e)}")
@@ -278,7 +341,7 @@ class StatsWindow(ImagePreviewMixin):
             tk.messagebox.showerror("Export Error", f"Failed to export {export_type}:\n{str(e)}")
     
     def close_window(self):
-        """Handle window closing with cleanup."""
+        """Handle window closing with cleanup including combination analysis."""
         try:
             if hasattr(self, 'chart_generator'):
                 self.chart_generator.cleanup_chart()
@@ -288,6 +351,9 @@ class StatsWindow(ImagePreviewMixin):
             
             if hasattr(self, 'prompt_analyzer_ui'):
                 self.prompt_analyzer_ui.cleanup()
+            
+            if hasattr(self, 'word_combination_ui') and self.word_combination_ui:
+                self.word_combination_ui.cleanup()
             
             self.cleanup_preview_resources()
             

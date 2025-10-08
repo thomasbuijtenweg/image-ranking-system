@@ -15,6 +15,7 @@ from .chart_generator import ChartGenerator
 from .data_exporter import DataExporter
 from .prompt_analyzer_ui import PromptAnalyzerUI
 from .stats_table import StatsTable
+from .word_combination_analyzer_ui import WordCombinationAnalyzerUI
 
 __all__ = [
     'ImageDisplayController',
@@ -26,5 +27,6 @@ __all__ = [
     'ChartGenerator',
     'DataExporter',
     'PromptAnalyzerUI',
-    'StatsTable'
+    'StatsTable',
+    'WordCombinationAnalyzerUI'
 ]
