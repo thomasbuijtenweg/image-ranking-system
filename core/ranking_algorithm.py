@@ -102,33 +102,45 @@ class RankingAlgorithm:
         return overflowing_tiers
     
     def _select_most_overflowing_tier(self, overflowing_tiers: List[int], active_images: List[str]) -> int:
-        """Select the most overflowing tier from the list."""
+        """Select the most overflowing tier from the list - NOW PRIORITIZES LOWEST TIERS."""
         if not overflowing_tiers:
             return 0
         
-        # Calculate overflow amount for each tier
-        tier_counts = defaultdict(int)
-        for img in active_images:  # Use active_images instead of available_images
-            tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
-            tier_counts[tier] += 1
+        # CHANGED: Always select the LOWEST tier when multiple are overflowing
+        # This ensures we focus on cleaning up low-tier images first for faster dataset reduction
+        lowest_tier = min(overflowing_tiers)
         
-        total_images = len(active_images)
-        max_overflow = 0
-        most_overflowing_tier = overflowing_tiers[0]
+        # Optional: Log which tier was selected for transparency
+        if len(overflowing_tiers) > 1:
+            print(f"Multiple tiers overflowing {overflowing_tiers}, selecting lowest: {lowest_tier} for low-tier focus")
         
-        overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
+        return lowest_tier
         
-        for tier in overflowing_tiers:
-            actual_count = tier_counts[tier]
-            expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
-            expected_count = expected_proportion * total_images * overflow_threshold
-            
-            overflow_amount = actual_count - expected_count
-            if overflow_amount > max_overflow:
-                max_overflow = overflow_amount
-                most_overflowing_tier = tier
-        
-        return most_overflowing_tier
+        # NOTE: Original logic below is kept commented for reference/easy rollback
+        # The original logic selected the tier with the highest overflow amount
+        # # Calculate overflow amount for each tier
+        # tier_counts = defaultdict(int)
+        # for img in active_images:  # Use active_images instead of available_images
+        #     tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
+        #     tier_counts[tier] += 1
+        # 
+        # total_images = len(active_images)
+        # max_overflow = 0
+        # most_overflowing_tier = overflowing_tiers[0]
+        # 
+        # overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
+        # 
+        # for tier in overflowing_tiers:
+        #     actual_count = tier_counts[tier]
+        #     expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
+        #     expected_count = expected_proportion * total_images * overflow_threshold
+        #     
+        #     overflow_amount = actual_count - expected_count
+        #     if overflow_amount > max_overflow:
+        #         max_overflow = overflow_amount
+        #         most_overflowing_tier = tier
+        # 
+        # return most_overflowing_tier
     
     def _calculate_image_confidence(self, image_name: str) -> float:
         """Calculate confidence score for an image based on tier stability and vote count."""
