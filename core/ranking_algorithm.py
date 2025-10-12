@@ -76,14 +76,29 @@ class RankingAlgorithm:
         return self._fallback_random_selection(active_images, exclude_pair)
     
     def _find_overflowing_tiers(self, active_images: List[str]) -> List[int]:
-        """Find tiers that have more ACTIVE images than expected based on normal distribution."""
+        """Find tiers that have more ACTIVE images than expected based on normal distribution.
+        Uses dynamic mean centering for more adaptive tier management."""
         tier_counts = defaultdict(int)
+        tier_list = []  # Keep track of all tiers for mean calculation
+        
         for img in active_images:  # Only count active images
             tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
             tier_counts[tier] += 1
+            tier_list.append(tier)
         
         total_active_images = len(active_images)  # Use active image count
         overflowing_tiers = []
+        
+        # Calculate and display the current mean tier (for debugging/monitoring)
+        if tier_list:
+            mean_tier = sum(tier_list) / len(tier_list)
+            # Optional: Log the dynamic mean for transparency
+            if hasattr(self, '_last_logged_mean') and abs(self._last_logged_mean - mean_tier) > 0.5:
+                print(f"Distribution center shifted to tier {mean_tier:.2f} (was {self._last_logged_mean:.2f})")
+                self._last_logged_mean = mean_tier
+            elif not hasattr(self, '_last_logged_mean'):
+                print(f"Distribution centered at tier {mean_tier:.2f}")
+                self._last_logged_mean = mean_tier
         
         # Get overflow settings from algorithm_settings
         overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
@@ -260,18 +275,30 @@ class RankingAlgorithm:
         return pair[0], pair[1]
     
     def _calculate_expected_tier_proportion(self, tier: int, total_active_images: int) -> float:
-        """Calculate expected proportion of images in a tier based on normal distribution."""
+        """Calculate expected proportion of images in a tier based on normal distribution.
+        Now dynamically centers the distribution on the actual mean tier of active images."""
         std_dev = self.data_manager.algorithm_settings.tier_distribution_std
         
-        density = math.exp(-(tier ** 2) / (2 * std_dev ** 2))
-        
-        # Only consider tiers that have active images
-        all_tiers = set()
+        # Calculate the actual mean tier of active images
+        active_tiers = []
         for img_name, stats in self.data_manager.image_stats.items():
             if not self.data_manager.is_image_binned(img_name):  # Only active images
-                all_tiers.add(stats.get('current_tier', 0))
+                active_tiers.append(stats.get('current_tier', 0))
         
-        total_density = sum(math.exp(-(t ** 2) / (2 * std_dev ** 2)) for t in all_tiers)
+        if not active_tiers:
+            return 0.0
+        
+        # Calculate mean tier (this is where the normal distribution should be centered)
+        mean_tier = sum(active_tiers) / len(active_tiers)
+        
+        # Use dynamic mean for normal distribution calculation
+        density = math.exp(-((tier - mean_tier) ** 2) / (2 * std_dev ** 2))
+        
+        # Only consider tiers that have active images
+        all_tiers = set(active_tiers)
+        
+        # Calculate total density with dynamic mean
+        total_density = sum(math.exp(-((t - mean_tier) ** 2) / (2 * std_dev ** 2)) for t in all_tiers)
         
         return density / total_density if total_density > 0 else 0.0
     
@@ -292,6 +319,13 @@ class RankingAlgorithm:
         
         tier1 = stats1.get('current_tier', 0)
         tier2 = stats2.get('current_tier', 0)
+        
+        # Calculate current mean tier for display
+        active_tiers = []
+        for img_name, stats in self.data_manager.image_stats.items():
+            if not self.data_manager.is_image_binned(img_name):
+                active_tiers.append(stats.get('current_tier', 0))
+        mean_tier = sum(active_tiers) / len(active_tiers) if active_tiers else 0
         
         # Get algorithm settings for explanation
         overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
@@ -318,7 +352,7 @@ class RankingAlgorithm:
             expected_size = expected_proportion * total_images
             
             explanation = (f"Overflowing Tier {tier1} ({tier_size} images, expected ~{expected_size:.1f}, "
-                        f"threshold {overflow_threshold:.1f}x): "
+                        f"threshold {overflow_threshold:.1f}x, center={mean_tier:.1f}): "
                         f"Left image ({breakdown1['votes']} votes, confidence: {breakdown1['confidence']:.3f}) vs "
                         f"Right image ({breakdown2['votes']} votes, confidence: {breakdown2['confidence']:.3f}) | "
                         f"{pair_status} | Coverage: {pair_stats['coverage_percentage']:.1f}%")
@@ -412,3 +446,46 @@ class RankingAlgorithm:
                 'confidence': [],
                 'stability': []
             }
+    
+    def get_distribution_stats(self) -> Dict[str, Any]:
+        """Get statistics about the current tier distribution."""
+        active_tiers = []
+        tier_counts = defaultdict(int)
+        
+        for img_name, stats in self.data_manager.image_stats.items():
+            if not self.data_manager.is_image_binned(img_name):
+                tier = stats.get('current_tier', 0)
+                active_tiers.append(tier)
+                tier_counts[tier] += 1
+        
+        if not active_tiers:
+            return {
+                'mean_tier': 0,
+                'median_tier': 0,
+                'std_dev': 0,
+                'min_tier': 0,
+                'max_tier': 0,
+                'total_active': 0,
+                'tier_distribution': {}
+            }
+        
+        # Calculate statistics
+        mean_tier = sum(active_tiers) / len(active_tiers)
+        median_tier = statistics.median(active_tiers)
+        std_dev = statistics.stdev(active_tiers) if len(active_tiers) > 1 else 0
+        
+        # Find overflowing tiers
+        overflowing = self._find_overflowing_tiers([img for img in self.data_manager.image_stats.keys()
+                                                     if not self.data_manager.is_image_binned(img)])
+        
+        return {
+            'mean_tier': round(mean_tier, 2),
+            'median_tier': median_tier,
+            'std_dev': round(std_dev, 2),
+            'min_tier': min(active_tiers),
+            'max_tier': max(active_tiers),
+            'total_active': len(active_tiers),
+            'tier_distribution': dict(tier_counts),
+            'overflowing_tiers': overflowing,
+            'distribution_center': round(mean_tier, 2)  # Explicitly show where normal distribution is centered
+        }
