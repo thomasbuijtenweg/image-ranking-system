@@ -35,44 +35,56 @@ class RankingAlgorithm:
             # If no overflowing tiers, fall back to random selection
             return self._fallback_random_selection(active_images, exclude_pair)
         
-        # Select the most overflowing tier
-        selected_tier = self._select_most_overflowing_tier(overflowing_tiers, active_images)
+        # Sort overflowing tiers by priority (lowest first)
+        sorted_overflowing_tiers = sorted(overflowing_tiers)
         
-        # Get images in selected tier
-        tier_images = [img for img in active_images 
-                    if self.data_manager.get_image_stats(img).get('current_tier', 0) == selected_tier]
-        
-        if len(tier_images) < 2:
-            return self._fallback_random_selection(active_images, exclude_pair)
-        
-        # Try to find an untested pair from this tier
-        max_attempts = min(50, len(tier_images) * (len(tier_images) - 1) // 2)
-        
-        for attempt in range(max_attempts):
-            # Select left image (lowest confidence)
-            left_image = self._select_lowest_confidence_image(selected_tier, tier_images)
+        # Try each overflowing tier in order (lowest first)
+        for selected_tier in sorted_overflowing_tiers:
+            # Get images in selected tier
+            tier_images = [img for img in active_images 
+                        if self.data_manager.get_image_stats(img).get('current_tier', 0) == selected_tier]
             
-            # Select right image (high confidence + low recency, excluding left)
-            right_image = self._select_high_confidence_low_recency_image(
-                selected_tier, tier_images, left_image, exclude_pair)
+            if len(tier_images) < 2:
+                # Not enough images in this tier, try next tier
+                continue
             
-            if left_image and right_image and left_image != right_image:
-                # Check if this pair has already been tested
-                if not self.data_manager.has_pair_been_tested(left_image, right_image):
-                    # Also check exclude_pair
-                    if not exclude_pair or {left_image, right_image} != set(exclude_pair):
-                        return left_image, right_image
+            # Check if this tier has any untested pairs available
+            if not self._has_untested_pairs(tier_images, exclude_pair):
+                # All pairs in this tier have been tested, skip to next tier
+                continue
+            
+            # Try to find an untested pair from this tier
+            max_attempts = min(50, len(tier_images) * (len(tier_images) - 1) // 2)
+            
+            for attempt in range(max_attempts):
+                # Select left image (lowest confidence)
+                left_image = self._select_lowest_confidence_image(selected_tier, tier_images)
                 
-                # If this pair was already tested, remove these images from consideration and try again
-                if left_image in tier_images:
-                    tier_images.remove(left_image)
-                if right_image in tier_images:
-                    tier_images.remove(right_image)
+                # Select right image (high confidence + low recency, excluding left)
+                right_image = self._select_high_confidence_low_recency_image(
+                    selected_tier, tier_images, left_image, exclude_pair)
                 
-                if len(tier_images) < 2:
-                    break
-    
-        # If we couldn't find an untested pair in overflow tier, try random
+                if left_image and right_image and left_image != right_image:
+                    # Check if this pair has already been tested
+                    if not self.data_manager.has_pair_been_tested(left_image, right_image):
+                        # Also check exclude_pair
+                        if not exclude_pair or {left_image, right_image} != set(exclude_pair):
+                            return left_image, right_image
+                    
+                    # If this pair was already tested, remove these images from consideration and try again
+                    if left_image in tier_images:
+                        tier_images.remove(left_image)
+                    if right_image in tier_images:
+                        tier_images.remove(right_image)
+                    
+                    if len(tier_images) < 2:
+                        # Not enough images left in this tier, move to next tier
+                        break
+            
+            # If we found a valid pair in this tier, we would have returned already
+            # Otherwise, continue to next tier
+        
+        # If we couldn't find an untested pair in any overflow tier, fall back to random
         return self._fallback_random_selection(active_images, exclude_pair)
     
     def _find_overflowing_tiers(self, active_images: List[str]) -> List[int]:
@@ -175,25 +187,111 @@ class RankingAlgorithm:
         return 1.0 / (1.0 + effective_stability)
     
     def _select_lowest_confidence_image(self, tier: int, tier_images: List[str]) -> Optional[str]:
-        """Select the image with lowest confidence from the given tier."""
+        """Select image with low confidence, prioritizing under-tested images."""
         if not tier_images:
             return None
         
-        # Calculate confidence for each image
-        confidence_scores = []
+        current_vote_count = self.data_manager.vote_count
+        min_votes_threshold = self.data_manager.algorithm_settings.min_votes_for_stability
+        
+        # Calculate combined score for each image
+        combined_scores = []
         for img in tier_images:
             confidence = self._calculate_image_confidence(img)
-            confidence_scores.append((confidence, img))
+            stats = self.data_manager.get_image_stats(img)
+            votes = stats.get('votes', 0)
+            tier_history = stats.get('tier_history', [0])
+            
+            # Calculate time since last voted (higher = less recent = better)
+            last_voted = stats.get('last_voted', -1)
+            
+            if last_voted == -1:
+                time_since_voted = current_vote_count + 1  # Never voted = maximum
+            else:
+                time_since_voted = current_vote_count - last_voted
+            
+            # Normalize time_since_voted to 0-1 range
+            max_time = current_vote_count + 1
+            time_factor = time_since_voted / max_time if max_time > 0 else 0
+            
+            # Calculate vote deficiency factor (prioritize under-tested images)
+            # If votes < min_votes_threshold, boost priority
+            if votes < min_votes_threshold:
+                # Scale from 1.0 (0 votes) to 0.0 (min_votes_threshold)
+                vote_deficiency = 1.0 - (votes / min_votes_threshold)
+            else:
+                # No boost for well-tested images
+                vote_deficiency = 0.0
+            
+            # Calculate tier stability for detailed logging
+            tier_stability = self._calculate_tier_stability(img)
+            
+            # Combine with weighted factors:
+            # 50% inverted confidence (lower confidence = higher priority)
+            # 20% recency (older = higher priority)  
+            # 30% vote deficiency (fewer votes = higher priority)
+            inverted_confidence = 1.0 - confidence
+            
+            combined_score = (inverted_confidence * 0.5) + (time_factor * 0.2) + (vote_deficiency * 0.3)
+            
+            combined_scores.append((combined_score, confidence, time_since_voted, votes, vote_deficiency, tier_stability, tier_history, img))
         
-        # Sort by confidence (lowest first)
-        confidence_scores.sort(key=lambda x: x[0])
+        # Sort by combined score (highest first = lowest confidence + least recent + fewest votes)
+        combined_scores.sort(key=lambda x: x[0], reverse=True)
         
-        # Return the lowest confidence image
-        return confidence_scores[0][1]
+        # Log selection reasoning
+        print("\n=== LEFT Image Selection (Low Confidence + Under-tested Priority) ===")
+        print(f"Tier {tier} has {len(combined_scores)} candidates")
+        print(f"Weight: 50% Confidence (inverted) + 20% Recency + 30% Vote Deficiency")
+        print(f"Min votes threshold: {min_votes_threshold}\n")
+        
+        # Show top 3 candidates (selected + 2 runner-ups)
+        top_candidates = combined_scores[:min(3, len(combined_scores))]
+        for i, (score, conf, recency, votes, vote_def, tier_stab, tier_hist, img) in enumerate(top_candidates):
+            status = "✓ SELECTED" if i == 0 else "  Runner-up"
+            conf_contribution = (1.0 - conf) * 0.5
+            recency_normalized = recency / max(1, current_vote_count + 1)
+            recency_contribution = recency_normalized * 0.2
+            vote_contribution = vote_def * 0.3
+            
+            under_tested_marker = " [UNDER-TESTED]" if votes < min_votes_threshold else ""
+            
+            print(f"{status} #{i+1}: {img}{under_tested_marker}")
+            print(f"    Combined Score: {score:.4f}")
+            
+            # Detailed confidence calculation breakdown
+            if votes > 0:
+                effective_stability = tier_stab / math.sqrt(votes) if votes > 0 else 0
+                print(f"    - Confidence: {conf:.4f}")
+                print(f"        • Tier History: {tier_hist}")
+                print(f"        • Tier Stability (stdev): {tier_stab:.4f}")
+                print(f"        • Vote Count: {votes} → sqrt({votes}) = {math.sqrt(votes):.4f}")
+                print(f"        • Effective Stability: {tier_stab:.4f} / {math.sqrt(votes):.4f} = {effective_stability:.4f}")
+                print(f"        • Confidence Formula: 1 / (1 + {effective_stability:.4f}) = {conf:.4f}")
+            else:
+                print(f"    - Confidence: {conf:.4f} (0 votes = 0 confidence)")
+            
+            print(f"        → Inverted: {1.0-conf:.4f} → Contribution: {conf_contribution:.4f} (50%)")
+            
+            print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_contribution:.4f} (20%)")
+            print(f"    - Vote Count: {votes} votes → Deficiency: {vote_def:.4f} → Contribution: {vote_contribution:.4f} (30%)")
+            
+            if i == 0 and len(combined_scores) > 1:
+                second_score = combined_scores[1][0]
+                margin = score - second_score
+                print(f"    ▶ Won by margin: {margin:.4f}")
+            elif i > 0:
+                winner_score = combined_scores[0][0]
+                deficit = winner_score - score
+                print(f"    ▶ Lost by margin: {deficit:.4f}")
+            print()
+        
+        # Return the image with highest combined score
+        return combined_scores[0][7]
     
     def _select_high_confidence_low_recency_image(self, tier: int, tier_images: List[str], 
                                                 exclude_image: str, exclude_pair: Optional[Tuple[str, str]] = None) -> Optional[str]:
-        """Select image with high confidence and low recency (not checked recently) from the tier."""
+        """Select image with high confidence and low recency, prioritizing recency over confidence."""
         if not tier_images:
             return None
         
@@ -213,9 +311,11 @@ class RankingAlgorithm:
         
         for img in available_images:
             confidence = self._calculate_image_confidence(img)
+            stats = self.data_manager.get_image_stats(img)
+            votes = stats.get('votes', 0)
+            tier_history = stats.get('tier_history', [0])
             
             # Calculate time since last voted (higher = less recent = better)
-            stats = self.data_manager.get_image_stats(img)
             last_voted = stats.get('last_voted', -1)
             
             if last_voted == -1:
@@ -227,52 +327,141 @@ class RankingAlgorithm:
             max_time = current_vote_count + 1
             time_factor = time_since_voted / max_time if max_time > 0 else 0
             
-            # Combine confidence and time factor (equal weight)
-            combined_score = (confidence + time_factor) / 2.0
+            # Calculate tier stability for detailed logging
+            tier_stability = self._calculate_tier_stability(img)
             
-            scored_images.append((combined_score, img))
+            # Combine with 40% confidence and 60% recency (recency prioritized)
+            combined_score = (confidence * 0.4) + (time_factor * 0.6)
+            
+            scored_images.append((combined_score, confidence, time_since_voted, votes, tier_stability, tier_history, img))
         
         # Sort by combined score (highest first)
         scored_images.sort(key=lambda x: x[0], reverse=True)
         
+        # Log selection reasoning
+        print("\n=== RIGHT Image Selection (Recency Priority + High Confidence) ===")
+        print(f"Tier {tier} has {len(scored_images)} candidates (excluding LEFT image)")
+        print(f"Weight: 40% Confidence + 60% Recency\n")
+        
+        # Show top 3 candidates (selected + 2 runner-ups)
+        top_candidates = scored_images[:min(3, len(scored_images))]
+        for i, (score, conf, recency, votes, tier_stab, tier_hist, img) in enumerate(top_candidates):
+            status = "✓ SELECTED" if i == 0 else "  Runner-up"
+            conf_contribution = conf * 0.4
+            recency_normalized = recency / max(1, current_vote_count + 1)
+            recency_contribution = recency_normalized * 0.6
+            
+            print(f"{status} #{i+1}: {img}")
+            print(f"    Combined Score: {score:.4f}")
+            
+            # Detailed confidence calculation breakdown
+            if votes > 0:
+                effective_stability = tier_stab / math.sqrt(votes) if votes > 0 else 0
+                print(f"    - Confidence: {conf:.4f}")
+                print(f"        • Tier History: {tier_hist}")
+                print(f"        • Tier Stability (stdev): {tier_stab:.4f}")
+                print(f"        • Vote Count: {votes} → sqrt({votes}) = {math.sqrt(votes):.4f}")
+                print(f"        • Effective Stability: {tier_stab:.4f} / {math.sqrt(votes):.4f} = {effective_stability:.4f}")
+                print(f"        • Confidence Formula: 1 / (1 + {effective_stability:.4f}) = {conf:.4f}")
+            else:
+                print(f"    - Confidence: {conf:.4f} (0 votes = 0 confidence)")
+            
+            print(f"        → Contribution: {conf_contribution:.4f} (40%)")
+            
+            print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_contribution:.4f} (60%)")
+            
+            if i == 0 and len(scored_images) > 1:
+                second_score = scored_images[1][0]
+                margin = score - second_score
+                print(f"    ▶ Won by margin: {margin:.4f}")
+            elif i > 0:
+                winner_score = scored_images[0][0]
+                deficit = winner_score - score
+                print(f"    ▶ Lost by margin: {deficit:.4f}")
+            print()
+        
+        print("=" * 60)
+        
         # Return the best scoring image
-        return scored_images[0][1]
+        return scored_images[0][6]
+    
+    def _has_untested_pairs(self, tier_images: List[str], 
+                           exclude_pair: Optional[Tuple[str, str]] = None) -> bool:
+        """Check if a tier has any untested pairs available."""
+        if len(tier_images) < 2:
+            return False
+        
+        exclude_set = set(exclude_pair) if exclude_pair else set()
+        
+        # Check all possible pairs in this tier
+        for i, img1 in enumerate(tier_images):
+            for img2 in tier_images[i+1:]:
+                # Skip the exclude_pair
+                if exclude_set and {img1, img2} == exclude_set:
+                    continue
+                
+                # If we find any untested pair, return True
+                if not self.data_manager.has_pair_been_tested(img1, img2):
+                    return True
+        
+        # No untested pairs found in this tier
+        return False
     
     def _fallback_random_selection(self, active_images: List[str], 
                              exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
-        """Fallback to random selection when tier-based selection fails, avoiding tested pairs."""
+        """Fallback to selecting least recently tested images when tier-based selection fails."""
         if len(active_images) < 2:
             return None, None
         
         exclude_set = set(exclude_pair) if exclude_pair else set()
+        current_vote_count = self.data_manager.vote_count
         
-        # Try to find an untested pair
-        max_attempts = min(100, len(active_images) * (len(active_images) - 1) // 2)
-        
-        for _ in range(max_attempts):
-            pair = random.sample(active_images, 2)
-            img1, img2 = pair
+        # Score all images by how long since they were last tested
+        # Higher score = tested longer ago = higher priority
+        image_recency_scores = []
+        for img in active_images:
+            stats = self.data_manager.get_image_stats(img)
+            last_voted = stats.get('last_voted', -1)
             
-            # Skip excluded pair
-            if set(pair) == exclude_set:
-                continue
+            if last_voted == -1:
+                # Never voted = maximum priority
+                time_since_voted = current_vote_count + 1
+            else:
+                time_since_voted = current_vote_count - last_voted
             
-            # Check if this pair has already been tested
-            if not self.data_manager.has_pair_been_tested(img1, img2):
-                return img1, img2
+            image_recency_scores.append((time_since_voted, img))
         
-        # If we can't find any untested pairs, return any valid pair
-        # This should be very rare - only happens when most pairs have been tested
-        for _ in range(10):
-            pair = random.sample(active_images, 2)
-            if not exclude_set or set(pair) != exclude_set:
-                print(f"Warning: All pairs may have been tested, returning tested pair: {pair[0]} vs {pair[1]}")
-                return pair[0], pair[1]
+        # Sort by recency score (highest first = least recently tested)
+        image_recency_scores.sort(key=lambda x: x[0], reverse=True)
         
-        # Final fallback
-        pair = random.sample(active_images, 2)
-        print(f"Final fallback: {pair[0]} vs {pair[1]}")
-        return pair[0], pair[1]
+        # Try to find an untested pair starting with least recently tested images
+        for i, (score1, img1) in enumerate(image_recency_scores):
+            for score2, img2 in image_recency_scores[i+1:]:
+                # Skip excluded pair
+                if exclude_set and {img1, img2} == exclude_set:
+                    continue
+                
+                # Check if this pair has already been tested
+                if not self.data_manager.has_pair_been_tested(img1, img2):
+                    return img1, img2
+        
+        # If we can't find any untested pairs, select the least recently tested pair
+        # This is very rare - only happens when most/all pairs have been tested
+        print(f"Warning: All untested pairs exhausted, selecting least recently tested pair")
+        
+        # Get the two least recently tested images that aren't the exclude_pair
+        for i, (score1, img1) in enumerate(image_recency_scores):
+            for score2, img2 in image_recency_scores[i+1:]:
+                if not exclude_set or {img1, img2} != exclude_set:
+                    return img1, img2
+        
+        # Final fallback (should be extremely rare)
+        if len(active_images) >= 2:
+            pair = [image_recency_scores[0][1], image_recency_scores[1][1]]
+            print(f"Final fallback: {pair[0]} vs {pair[1]}")
+            return pair[0], pair[1]
+        
+        return None, None
     
     def _calculate_expected_tier_proportion(self, tier: int, total_active_images: int) -> float:
         """Calculate expected proportion of images in a tier based on normal distribution.

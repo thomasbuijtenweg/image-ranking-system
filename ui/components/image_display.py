@@ -2,7 +2,7 @@
 Image display controller for the Image Ranking System.
 
 This module handles all image display logic, including loading, resizing,
-and updating image information in the UI.
+and updating image information in the UI, including tier-based color theming.
 """
 
 import tkinter as tk
@@ -18,7 +18,7 @@ class ImageDisplayController:
     Handles image display and management for the main voting interface.
     
     This controller manages the left and right image display areas,
-    including image loading, resizing, and metadata display.
+    including image loading, resizing, metadata display, and tier-based color theming.
     """
     
     def __init__(self, parent: tk.Tk, data_manager, image_processor, prompt_analyzer):
@@ -147,9 +147,84 @@ class ImageDisplayController:
         if self.right_image_label:
             self.right_image_label.bind("<Button-1>", lambda e: right_callback())
     
+    def _get_tier_colors(self, tier: int) -> Dict[str, str]:
+        """
+        Get color scheme based on image tier.
+        
+        Args:
+            tier: The tier level of the image
+            
+        Returns:
+            Dictionary with color values for different UI elements
+        """
+        if tier <= -2:
+            # Red warning colors for tier -2 and lower (binning candidates)
+            return {
+                'frame_bg': Colors.BG_BINNING_SECONDARY,
+                'image_bg': Colors.BG_BINNING_TERTIARY,
+                'info_bg': Colors.BG_BINNING_SECONDARY,
+                'metadata_bg': Colors.BG_BINNING_SECONDARY,
+                'border_color': Colors.BORDER_BINNING
+            }
+        else:
+            # Normal colors for all other tiers
+            return {
+                'frame_bg': Colors.BG_SECONDARY,
+                'image_bg': Colors.BG_TERTIARY,
+                'info_bg': Colors.BG_SECONDARY,
+                'metadata_bg': Colors.BG_SECONDARY,
+                'border_color': Colors.BORDER
+            }
+    
+    def _update_frame_colors(self, side: str, tier: int) -> None:
+        """
+        Update the color scheme of a frame based on tier.
+        
+        Args:
+            side: Which side to update ('left' or 'right')
+            tier: The tier level to determine colors
+        """
+        colors = self._get_tier_colors(tier)
+        
+        if side == 'left':
+            frame = self.left_frame
+            image_label = self.left_image_label
+            info_label = self.left_info_label
+            metadata_label = self.left_metadata_label
+        else:
+            frame = self.right_frame
+            image_label = self.right_image_label
+            info_label = self.right_info_label
+            metadata_label = self.right_metadata_label
+        
+        # Update frame colors
+        if frame:
+            frame.config(bg=colors['frame_bg'])
+        
+        # Only update label colors if they don't have images
+        # (to avoid tkinter errors with image references)
+        if image_label:
+            try:
+                # Check if label has an image by trying to get the image option
+                current_image = image_label.cget('image')
+                if not current_image or current_image == '':
+                    # No image, safe to change background
+                    image_label.config(bg=colors['image_bg'])
+            except:
+                # If there's any error, just update the background
+                try:
+                    image_label.config(bg=colors['image_bg'])
+                except:
+                    pass
+        
+        if info_label:
+            info_label.config(bg=colors['info_bg'])
+        if metadata_label:
+            metadata_label.config(bg=colors['metadata_bg'])
+    
     def display_image(self, filename: str, side: str) -> None:
         """
-        Display an image on the specified side.
+        Display an image on the specified side with tier-based coloring.
         
         Args:
             filename: Name of the image file to display
@@ -157,6 +232,13 @@ class ImageDisplayController:
         """
         try:
             img_path = os.path.join(self.data_manager.image_folder, filename)
+            
+            # Get tier for color scheme
+            stats = self.data_manager.get_image_stats(filename)
+            tier = stats.get('current_tier', 0)
+            
+            # Update frame colors based on tier
+            self._update_frame_colors(side, tier)
             
             # Force window to update and get actual dimensions
             self.parent.update_idletasks()
@@ -211,6 +293,7 @@ class ImageDisplayController:
             side: Which side to update ('left' or 'right')
         """
         stats = self.data_manager.get_image_stats(filename)
+        tier = stats.get('current_tier', 0)
         
         # Calculate individual stability (requires ranking algorithm)
         stability = 0.0
@@ -219,9 +302,14 @@ class ImageDisplayController:
             stability = self.ranking_algorithm._calculate_tier_stability(filename)
             confidence = self.ranking_algorithm._calculate_image_confidence(filename)
         
+        # Add binning warning indicator for low tiers
+        tier_indicator = f"Tier: {tier}"
+        if tier <= -2:
+            tier_indicator += " ⚠️ BINNING CANDIDATE"
+        
         # Create info text with selection method indication
         selection_indicator = "(Low confidence)" if side == 'left' else "(High confidence, low recency)"
-        info_text = (f"Tier: {stats.get('current_tier', 0)} | "
+        info_text = (f"{tier_indicator} | "
                     f"Wins: {stats.get('wins', 0)} | "
                     f"Losses: {stats.get('losses', 0)} | "
                     f"Stability: {stability:.2f} | "
@@ -332,6 +420,12 @@ class ImageDisplayController:
     
     def clear_images(self) -> None:
         """Clear all image references to help with garbage collection."""
+        # Clear UI labels FIRST (before updating colors)
+        if self.left_image_label:
+            self.left_image_label.config(image="", text="No image")
+        if self.right_image_label:
+            self.right_image_label.config(image="", text="No image")
+        
         # Clear current displayed images
         self.current_images['left'] = None
         self.current_images['right'] = None
@@ -340,11 +434,9 @@ class ImageDisplayController:
         self.next_pair_images['left'] = None
         self.next_pair_images['right'] = None
         
-        # Clear UI labels
-        if self.left_image_label:
-            self.left_image_label.config(image="", text="No image")
-        if self.right_image_label:
-            self.right_image_label.config(image="", text="No image")
+        # NOW reset frame colors to normal (after clearing images)
+        self._update_frame_colors('left', 0)
+        self._update_frame_colors('right', 0)
         
         # Force garbage collection
         gc.collect()

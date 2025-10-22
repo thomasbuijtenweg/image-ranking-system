@@ -27,6 +27,12 @@ class Colors:
     
     BORDER = '#333333'
     SEPARATOR = '#4a4a4a'
+    
+    # Binning tier warning colors (for tier -2 and lower)
+    BG_BINNING_PRIMARY = '#3d1e1e'  # Dark red background
+    BG_BINNING_SECONDARY = '#4d2d2d'  # Slightly lighter dark red
+    BG_BINNING_TERTIARY = '#5d3d3d'  # Even lighter red for image area
+    BORDER_BINNING = '#ff4444'  # Red border
 
 
 class Defaults:
