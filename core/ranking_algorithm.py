@@ -17,13 +17,26 @@ class RankingAlgorithm:
         self.data_manager = data_manager
         self.confidence_calculator = ConfidenceCalculator(data_manager)
     
-    def select_next_pair(self, available_images: List[str], 
-                    exclude_pair: Optional[Tuple[str, str]] = None) -> Tuple[Optional[str], Optional[str]]:
-        """Select next pair using tier overflow and confidence-based selection, avoiding tested pairs."""
-    
-        # Filter out binned images
-        active_images = [img for img in available_images 
-                        if not self.data_manager.is_image_binned(img)]
+    def select_next_pair(self, available_images: List[str] = None, 
+                    exclude_pair: Optional[Tuple[str, str]] = None,
+                    filter_manager = None) -> Tuple[Optional[str], Optional[str]]:
+        """Select next pair using tier overflow and confidence-based selection, avoiding tested pairs.
+        
+        Args:
+            available_images: Optional list of images to consider (for backwards compatibility)
+            exclude_pair: Pair to exclude from selection
+            filter_manager: Optional FilterManager to apply prompt-based filtering
+        """
+        # Get available images from filter_manager if provided, otherwise use passed list
+        if filter_manager and filter_manager.is_active():
+            active_images = filter_manager.get_filtered_images()
+        elif available_images is not None:
+            # Filter out binned images from provided list
+            active_images = [img for img in available_images 
+                            if not self.data_manager.is_image_binned(img)]
+        else:
+            # If no list provided, use all active images
+            active_images = self.data_manager.get_active_images()
         
         if len(active_images) < 2:
             return None, None

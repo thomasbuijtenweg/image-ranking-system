@@ -117,8 +117,8 @@ class DataManager:
         loser_stats['last_voted'] = self.vote_count
         loser_stats['matchup_history'].append((winner, False, self.vote_count))
     
-    def save_to_file(self, filename: str) -> bool:
-        """Save all ranking data including tested pairs."""
+    def save_to_file(self, filename: str, filter_state: Optional[Dict[str, Any]] = None) -> bool:
+        """Save all ranking data including tested pairs and optional filter state."""
         # Convert sets to lists for JSON serialization
         serializable_stats = {}
         for img_name, stats in self.image_stats.items():
@@ -141,9 +141,9 @@ class DataManager:
         weight_data = self.weight_manager.export_to_data()
         algorithm_settings = self.algorithm_settings.export_settings()
         
-        # Prepare complete save data
+        # Prepare complete save data with optional filter state
         save_data = self.data_persistence.prepare_save_data(
-            core_data, weight_data, algorithm_settings)
+            core_data, weight_data, algorithm_settings, filter_state)
         
         # Save to file
         return self.data_persistence.save_to_file(filename, save_data)

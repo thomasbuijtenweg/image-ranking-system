@@ -95,14 +95,16 @@ class DataPersistence:
     
     def prepare_save_data(self, core_data: Dict[str, Any], 
                          weight_data: Dict[str, Any],
-                         algorithm_settings: Dict[str, Any]) -> Dict[str, Any]:
+                         algorithm_settings: Dict[str, Any],
+                         filter_state: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        Prepare save data without tier bounds settings.
+        Prepare save data without tier bounds settings, including optional filter state.
         
         Args:
             core_data: Core data (image_folder, vote_count, image_stats, metadata_cache, binned_images)
             weight_data: Weight manager export data
             algorithm_settings: Algorithm settings export
+            filter_state: Optional filter manager state
             
         Returns:
             Complete data dictionary ready for saving
@@ -114,6 +116,10 @@ class DataPersistence:
         # Ensure binned_images is included
         if 'binned_images' not in save_data:
             save_data['binned_images'] = []
+        
+        # Include filter state if provided
+        if filter_state:
+            save_data['filter_state'] = filter_state
         
         return save_data
     

@@ -36,6 +36,9 @@ class VotingController:
         
         # Image binner - will be initialized when folder is set
         self.image_binner = None
+        
+        # Filter manager - will be set by main window
+        self.filter_manager = None
         print("VotingController: Initialization complete")
     
     def create_vote_buttons(self, left_frame: tk.Frame, right_frame: tk.Frame) -> None:
@@ -83,6 +86,12 @@ class VotingController:
     def set_vote_callback(self, callback) -> None:
         """Set callback function to be called after each vote."""
         self.on_vote_callback = callback
+    
+    def set_filter_manager(self, filter_manager) -> None:
+        """Set the filter manager for prompt-based filtering."""
+        print("VotingController: Setting filter manager...")
+        self.filter_manager = filter_manager
+        print("VotingController: Filter manager set")
     
     def set_image_folder(self, folder_path: str) -> None:
         """Set the image folder and initialize the binner."""
@@ -273,7 +282,15 @@ class VotingController:
         if self.current_pair[0] and self.current_pair[1]:
             self.previous_pair = self.current_pair
         
-        img1, img2 = self.ranking_algorithm.select_next_pair(images, self.previous_pair)
+        # Get images list for backwards compatibility
+        images = self.image_processor.get_image_files(self.data_manager.image_folder)
+        
+        # Pass filter_manager to ranking algorithm
+        img1, img2 = self.ranking_algorithm.select_next_pair(
+            available_images=images,
+            exclude_pair=self.previous_pair,
+            filter_manager=self.filter_manager
+        )
         if not img1 or not img2:
             return
         
@@ -315,7 +332,12 @@ class VotingController:
         if len(images) < 2:
             return
         
-        self.next_pair = self.ranking_algorithm.select_next_pair(images, self.previous_pair)
+        # Pass filter_manager to ranking algorithm for preload
+        self.next_pair = self.ranking_algorithm.select_next_pair(
+            available_images=images,
+            exclude_pair=self.previous_pair,
+            filter_manager=self.filter_manager
+        )
         
         if self.next_pair[0] and self.next_pair[1]:
             self.image_display.preload_images(self.next_pair[0], self.next_pair[1])

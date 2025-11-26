@@ -11,6 +11,7 @@ from core.data_manager import DataManager
 from core.image_processor import ImageProcessor
 from core.ranking_algorithm import RankingAlgorithm
 from core.prompt_analyzer import PromptAnalyzer
+from core.filter_manager import FilterManager
 
 from ui.components.image_display import ImageDisplayController
 from ui.components.voting_controller import VotingController
@@ -18,6 +19,7 @@ from ui.components.metadata_processor import MetadataProcessor
 from ui.components.progress_tracker import ProgressTracker
 from ui.components.folder_manager import FolderManager
 from ui.components.ui_builder import UIBuilder
+from ui.components.filter_ui import FilterUI
 
 from ui.stats_window import StatsWindow
 from ui.settings_window import SettingsWindow
@@ -36,6 +38,7 @@ class MainWindow:
             self.image_processor = ImageProcessor()
             self.ranking_algorithm = RankingAlgorithm(self.data_manager)
             self.prompt_analyzer = PromptAnalyzer(self.data_manager)
+            self.filter_manager = FilterManager(self.data_manager, self.prompt_analyzer)
             print("MainWindow: Core components initialized successfully")
         except Exception as e:
             print(f"MainWindow: Error initializing core components: {e}")
@@ -62,6 +65,7 @@ class MainWindow:
         
         self.image_display = None
         self.voting_controller = None
+        self.filter_ui = None
         
         # Window references
         self.stats_window = None
@@ -95,7 +99,24 @@ class MainWindow:
                 self.prompt_analyzer
             )
             
-            self.image_display.create_image_frames(ui_refs['main_frame'])
+            # Create a container frame for filters (uses pack)
+            filter_container = tk.Frame(ui_refs['main_frame'], bg='#2b2b2b')
+            filter_container.pack(fill=tk.X, padx=5, pady=5)
+            
+            # Create filter UI in its own container
+            print("MainWindow: Creating filter UI...")
+            self.filter_ui = FilterUI(
+                filter_container,
+                self.filter_manager,
+                on_filter_change=self._on_filter_changed
+            )
+            print("MainWindow: Filter UI created successfully")
+            
+            # Create a separate container for image display (uses grid)
+            image_container = tk.Frame(ui_refs['main_frame'], bg='#2b2b2b')
+            image_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+            
+            self.image_display.create_image_frames(image_container)
             self.image_display.set_ranking_algorithm(self.ranking_algorithm)
             print("MainWindow: Image display controller created successfully")
             
@@ -115,6 +136,9 @@ class MainWindow:
             # FIXED: Set cross-references for binning functionality BEFORE any other operations
             print("MainWindow: Setting up cross-references...")
             self.folder_manager.set_voting_controller_reference(self.voting_controller)
+            
+            # Set filter manager reference in voting controller
+            self.voting_controller.set_filter_manager(self.filter_manager)
             
             self.folder_manager.set_ui_references(ui_refs['folder_label'], ui_refs['status_bar'])
             self.voting_controller.set_ui_references(ui_refs['status_bar'], ui_refs['stats_label'])
@@ -189,6 +213,11 @@ class MainWindow:
                 current_text = ui_refs['status_bar'].cget('text')
                 ui_refs['status_bar'].config(text=current_text + binner_status)
             
+            # Refresh filter UI after loading images
+            if self.filter_ui:
+                self.filter_ui.refresh()
+                print("MainWindow: Filter UI refreshed after loading images")
+            
             self.voting_controller.show_next_pair()
             
             print(f"MainWindow: Successfully loaded {len(images)} images (Active: {active_count}, Binned: {binned_count}){binner_status}")
@@ -206,6 +235,23 @@ class MainWindow:
             print(f"MainWindow: Error handling vote cast: {e}")
             # Non-critical error, continue
     
+    def _on_filter_changed(self) -> None:
+        """Handle filter changes."""
+        try:
+            print("MainWindow: Filter changed, refreshing voting pair...")
+            # Refresh the current image pair to respect new filters
+            if self.voting_controller:
+                self.voting_controller.show_next_pair()
+            
+            # Update filter UI
+            if self.filter_ui:
+                self.filter_ui.refresh()
+            
+            print("MainWindow: Filter change handled successfully")
+        except Exception as e:
+            print(f"MainWindow: Error handling filter change: {e}")
+            # Non-critical error, continue
+    
     def save_data(self) -> None:
         """Save ranking data to file with error handling."""
         try:
@@ -219,9 +265,45 @@ class MainWindow:
             )
             
             if filename:
-                if self.data_manager.save_to_file(filename):
+                # Prepare filter state for saving
+                filter_state = None
+                if self.filter_manager:
+                    filter_state = self.filter_manager.export_state()
+                
+                # Get core data
+                serializable_stats = {}
+                for img_name, stats in self.data_manager.image_stats.items():
+                    stats_copy = stats.copy()
+                    if 'tested_against' in stats_copy:
+                        stats_copy['tested_against'] = list(stats_copy['tested_against'])
+                    serializable_stats[img_name] = stats_copy
+                
+                core_data = {
+                    'image_folder': self.data_manager.image_folder,
+                    'vote_count': self.data_manager.vote_count,
+                    'image_stats': serializable_stats,
+                    'metadata_cache': self.data_manager.metadata_cache,
+                    'binned_images': list(self.data_manager.binned_images)
+                }
+                
+                # Get other settings
+                weight_data = self.data_manager.weight_manager.export_to_data()
+                algorithm_settings = self.data_manager.algorithm_settings.export_settings()
+                
+                # Prepare complete save data with filter state
+                save_data = self.data_manager.data_persistence.prepare_save_data(
+                    core_data, weight_data, algorithm_settings, filter_state)
+                
+                # Save to file
+                if self.data_manager.data_persistence.save_to_file(filename, save_data):
                     active_count = self.data_manager.get_active_image_count()
                     binned_count = self.data_manager.get_binned_image_count()
+                    
+                    # Get filter stats for save message
+                    filter_info = ""
+                    if self.filter_manager and self.filter_manager.is_active():
+                        stats = self.filter_manager.get_filter_stats()
+                        filter_info = f"\n\nActive filters saved: {len(stats['include_words'])} include, {len(stats['exclude_words'])} exclude words."
                     
                     # FIXED: Include binning status in save message
                     binner_status = ""
@@ -230,7 +312,7 @@ class MainWindow:
                     else:
                         binner_status = "\n\nNote: Binning functionality was not active when saving."
                     
-                    messagebox.showinfo("Success", f"Data saved to {filename}\n\nSaved {active_count} active images and {binned_count} binned images.{binner_status}")
+                    messagebox.showinfo("Success", f"Data saved to {filename}\n\nSaved {active_count} active images and {binned_count} binned images.{filter_info}{binner_status}")
                 else:
                     messagebox.showerror("Error", "Failed to save data")
         except Exception as e:
@@ -255,16 +337,67 @@ class MainWindow:
                     self.voting_controller.image_folder_path = None
                     print("MainWindow: Cleared existing image binner before loading")
                 
-                if self.folder_manager.load_from_file(filename):
+                # Load data from file
+                success, data, error_msg = self.data_manager.data_persistence.load_from_file(filename)
+                
+                if success:
+                    # Validate and fix data
+                    data = self.data_manager.data_persistence.validate_and_fix_data(data)
+                    
+                    # Extract and load core data
+                    core_data = self.data_manager.data_persistence.extract_core_data(data)
+                    self.data_manager.image_folder = core_data['image_folder']
+                    self.data_manager.vote_count = core_data['vote_count']
+                    self.data_manager.image_stats = core_data['image_stats']
+                    self.data_manager.metadata_cache = core_data['metadata_cache']
+                    self.data_manager.binned_images = core_data['binned_images']
+                    
+                    # Convert tested_against lists back to sets
+                    for img_name, stats in self.data_manager.image_stats.items():
+                        if 'tested_against' in stats and isinstance(stats['tested_against'], list):
+                            stats['tested_against'] = set(stats['tested_against'])
+                        elif 'tested_against' not in stats:
+                            stats['tested_against'] = set()
+                    
+                    # Load other settings
+                    self.data_manager.weight_manager.load_from_data(data)
+                    self.data_manager.algorithm_settings.load_settings(data)
+                    
+                    # Load filter state if present
+                    if 'filter_state' in data and self.filter_manager:
+                        print("MainWindow: Restoring filter state...")
+                        self.filter_manager.import_state(data['filter_state'])
+                        if self.filter_ui:
+                            self.filter_ui.refresh()
+                        print("MainWindow: Filter state restored")
+                    
+                    # Update existing images with strategic timing
+                    self.data_manager._update_existing_images_with_strategic_timing()
+                    
+                    # Initialize all image stats
+                    for image_filename in self.data_manager.image_stats:
+                        self.data_manager.initialize_image_stats(image_filename)
+                    
+                    # Now reload images from folder
+                    if self.data_manager.image_folder:
+                        print(f"MainWindow: Reloading images from saved folder: {self.data_manager.image_folder}")
+                        self.folder_manager.load_images()
+                    
                     ui_refs = self.ui_builder.get_ui_references()
                     active_count = self.data_manager.get_active_image_count()
                     binned_count = self.data_manager.get_binned_image_count()
                     ui_refs['stats_label'].config(
                         text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
                     )
+                    
+                    # Show filter info if filters were restored
+                    if 'filter_state' in data and self.filter_manager and self.filter_manager.is_active():
+                        filter_stats = self.filter_manager.get_filter_stats()
+                        print(f"MainWindow: Filters restored - {len(filter_stats['include_words'])} include, {len(filter_stats['exclude_words'])} exclude")
+                    
                     print(f"MainWindow: Data loaded successfully")
                 else:
-                    print(f"MainWindow: Failed to load data from {filename}")
+                    print(f"MainWindow: Failed to load data from {filename}: {error_msg}")
         except Exception as e:
             print(f"MainWindow: Error loading data: {e}")
             messagebox.showerror("Load Error", f"Failed to load data:\n{str(e)}")
