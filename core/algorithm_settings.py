@@ -13,6 +13,8 @@ class AlgorithmSettings:
     DEFAULT_OVERFLOW_THRESHOLD = 1.0
     DEFAULT_MIN_OVERFLOW_IMAGES = 2
     DEFAULT_MIN_VOTES_FOR_STABILITY = 6
+    DEFAULT_MAX_VOTES_MULTIPLIER = 1.5
+    DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER = 2.0
     
     # Valid ranges for settings
     VALID_RANGES = {
@@ -21,7 +23,9 @@ class AlgorithmSettings:
         'confidence_balance': (0.0, 1.0),
         'overflow_threshold': (0.5, 3.0),
         'min_overflow_images': (1, 20),
-        'min_votes_for_stability': (1, 50)
+        'min_votes_for_stability': (1, 50),
+        'max_votes_multiplier': (1.0, 5.0),
+        'max_votes_hard_limit_multiplier': (1.5, 10.0)
     }
     
     def __init__(self):
@@ -35,6 +39,8 @@ class AlgorithmSettings:
         self.overflow_threshold = self.DEFAULT_OVERFLOW_THRESHOLD
         self.min_overflow_images = self.DEFAULT_MIN_OVERFLOW_IMAGES
         self.min_votes_for_stability = self.DEFAULT_MIN_VOTES_FOR_STABILITY
+        self.max_votes_multiplier = self.DEFAULT_MAX_VOTES_MULTIPLIER
+        self.max_votes_hard_limit_multiplier = self.DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER
     
     def validate_setting(self, setting_name: str, value: Any) -> bool:
         """
@@ -103,7 +109,9 @@ class AlgorithmSettings:
                 'overflow_threshold': self.overflow_threshold,
                 'min_overflow_images': self.min_overflow_images,
                 'min_votes_for_stability': self.min_votes_for_stability,
-                'algorithm_version': '2.2'
+                'max_votes_multiplier': self.max_votes_multiplier,
+                'max_votes_hard_limit_multiplier': self.max_votes_hard_limit_multiplier,
+                'algorithm_version': '2.4'
             }
         }
     
@@ -125,6 +133,10 @@ class AlgorithmSettings:
                           settings.get('min_overflow_images', self.DEFAULT_MIN_OVERFLOW_IMAGES))
             self.set_value('min_votes_for_stability', 
                           settings.get('min_votes_for_stability', self.DEFAULT_MIN_VOTES_FOR_STABILITY))
+            self.set_value('max_votes_multiplier',
+                          settings.get('max_votes_multiplier', self.DEFAULT_MAX_VOTES_MULTIPLIER))
+            self.set_value('max_votes_hard_limit_multiplier',
+                          settings.get('max_votes_hard_limit_multiplier', self.DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER))
             
             print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.2')}")
         else:
@@ -169,6 +181,18 @@ class AlgorithmSettings:
                 'default': self.DEFAULT_MIN_VOTES_FOR_STABILITY,
                 'range': self.VALID_RANGES['min_votes_for_stability'],
                 'description': 'Minimum votes for stability calculation'
+            },
+            'max_votes_multiplier': {
+                'value': self.max_votes_multiplier,
+                'default': self.DEFAULT_MAX_VOTES_MULTIPLIER,
+                'range': self.VALID_RANGES['max_votes_multiplier'],
+                'description': 'Images with votes > avg_votes * multiplier get deprioritised'
+            },
+            'max_votes_hard_limit_multiplier': {
+                'value': self.max_votes_hard_limit_multiplier,
+                'default': self.DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER,
+                'range': self.VALID_RANGES['max_votes_hard_limit_multiplier'],
+                'description': 'Images with votes > avg_votes * this multiplier are excluded entirely from voting'
             }
         }
     
@@ -181,4 +205,6 @@ class AlgorithmSettings:
         new_settings.overflow_threshold = self.overflow_threshold
         new_settings.min_overflow_images = self.min_overflow_images
         new_settings.min_votes_for_stability = self.min_votes_for_stability
+        new_settings.max_votes_multiplier = self.max_votes_multiplier
+        new_settings.max_votes_hard_limit_multiplier = self.max_votes_hard_limit_multiplier
         return new_settings

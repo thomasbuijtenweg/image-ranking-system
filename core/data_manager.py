@@ -50,6 +50,134 @@ class DataManager:
         print(f"Image '{image_name}' has been binned")
         return True
     
+    def purge_binned_image_votes(self, binned_image: str) -> Dict[str, Any]:
+        """
+        Remove all vote history involving a binned image from active images.
+        
+        For every active (non-binned) image that was previously compared against
+        the binned image, this method:
+        - Removes all matchup_history entries involving the binned image
+        - Removes the binned image from tested_against
+        - Recalculates wins, losses, votes from remaining matchup history
+        - Replays tier progression from the remaining matchup history
+        
+        Args:
+            binned_image: Name of the image that was binned
+            
+        Returns:
+            Dict with purge statistics
+        """
+        if not hasattr(self, 'binned_images'):
+            self.binned_images = set()
+        
+        affected_images = 0
+        total_votes_removed = 0
+        
+        for img_name, stats in self.image_stats.items():
+            # Skip the binned image itself and any other binned images
+            if img_name == binned_image or img_name in self.binned_images:
+                continue
+            
+            # Check if this image has any matchup history with the binned image
+            matchup_history = stats.get('matchup_history', [])
+            original_len = len(matchup_history)
+            
+            # Filter out all matchups involving the binned image
+            filtered_history = [
+                (opponent, won, vote_num) for opponent, won, vote_num in matchup_history
+                if opponent != binned_image
+            ]
+            
+            votes_removed = original_len - len(filtered_history)
+            if votes_removed == 0:
+                continue
+            
+            affected_images += 1
+            total_votes_removed += votes_removed
+            
+            # Remove binned image from tested_against
+            tested_against = stats.get('tested_against', set())
+            if isinstance(tested_against, set):
+                tested_against.discard(binned_image)
+            elif isinstance(tested_against, list):
+                stats['tested_against'] = set(t for t in tested_against if t != binned_image)
+            
+            # Recalculate stats from the filtered matchup history
+            new_wins = sum(1 for _, won, _ in filtered_history if won)
+            new_losses = sum(1 for _, won, _ in filtered_history if not won)
+            new_votes = new_wins + new_losses
+            
+            # Replay tier progression from scratch
+            new_tier = 0
+            new_tier_history = [0]
+            for _, won, _ in filtered_history:
+                new_tier += 1 if won else -1
+                new_tier_history.append(new_tier)
+            
+            # Capture old tier before overwriting
+            old_tier = stats['current_tier']
+            
+            # Apply recalculated values
+            stats['matchup_history'] = filtered_history
+            stats['wins'] = new_wins
+            stats['losses'] = new_losses
+            stats['votes'] = new_votes
+            stats['current_tier'] = new_tier
+            stats['tier_history'] = new_tier_history
+            
+            print(f"  Purged {votes_removed} vote(s) involving '{binned_image}' from '{img_name}' "
+                  f"(tier: {old_tier} -> {new_tier})")
+        
+        print(f"Vote purge complete for '{binned_image}': "
+              f"{affected_images} images affected, {total_votes_removed} votes removed")
+        
+        return {
+            'affected_images': affected_images,
+            'total_votes_removed': total_votes_removed
+        }
+    
+    def purge_all_binned_image_votes(self) -> Dict[str, Any]:
+        """
+        Purge stale votes for all currently binned images.
+        
+        Cleans up save files where images were binned before the vote-purge
+        feature existed. Idempotent - safe to run multiple times.
+        
+        Returns:
+            Dict with purge statistics
+        """
+        if not self.binned_images:
+            print("No binned images found - nothing to purge")
+            return {'total_affected': 0, 'total_removed': 0, 'binned_processed': 0}
+        
+        total_affected = 0
+        total_removed = 0
+        
+        for binned_image in list(self.binned_images):
+            # Check if any active image still has matchup history with this binned image
+            has_stale_votes = any(
+                binned_image in [opp for opp, _, _ in stats.get('matchup_history', [])]
+                for img_name, stats in self.image_stats.items()
+                if img_name != binned_image and img_name not in self.binned_images
+            )
+            
+            if has_stale_votes:
+                result = self.purge_binned_image_votes(binned_image)
+                total_affected += result['affected_images']
+                total_removed += result['total_votes_removed']
+        
+        if total_removed > 0:
+            print(f"Purge complete: {total_removed} stale vote(s) removed "
+                  f"from {total_affected} image(s) across {len(self.binned_images)} binned image(s)")
+        else:
+            print("Purge complete: no stale votes found (already clean)")
+        
+        return {
+            'total_affected': total_affected,
+            'total_removed': total_removed,
+            'binned_processed': len(self.binned_images)
+        }
+    
     def is_image_binned(self, image_name: str) -> bool:
         """Check if an image is binned."""
         if not hasattr(self, 'binned_images'):

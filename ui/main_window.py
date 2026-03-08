@@ -85,6 +85,7 @@ class MainWindow:
                 'select_folder': self.folder_manager.select_folder,
                 'save_data': self.save_data,
                 'load_data': self.load_data,
+                'purge_binned_votes': self.purge_binned_votes,
                 'show_stats': self.show_detailed_stats,
                 'show_prompt_analysis': self.show_prompt_analysis,
                 'show_settings': self.show_settings
@@ -318,6 +319,65 @@ class MainWindow:
         except Exception as e:
             print(f"MainWindow: Error saving data: {e}")
             messagebox.showerror("Save Error", f"Failed to save data:\n{str(e)}")
+    
+    def purge_binned_votes(self) -> None:
+        """Purge stale votes from all binned images in the currently loaded data."""
+        try:
+            if not self.data_manager.image_stats:
+                messagebox.showinfo("No Data", "No data loaded. Please load a save file first.")
+                return
+            
+            binned_count = self.data_manager.get_binned_image_count()
+            if binned_count == 0:
+                messagebox.showinfo("No Binned Images", "There are no binned images in the current data.")
+                return
+            
+            # Confirm with user
+            confirm = messagebox.askyesno(
+                "Purge Binned Votes",
+                f"This will remove all vote history involving {binned_count} binned image(s) "
+                f"from the remaining active images, and recalculate their tiers.\n\n"
+                f"This cannot be undone. Continue?"
+            )
+            
+            if not confirm:
+                return
+            
+            print(f"MainWindow: Starting vote purge for {binned_count} binned images...")
+            result = self.data_manager.purge_all_binned_image_votes()
+            
+            # Update UI
+            ui_refs = self.ui_builder.get_ui_references()
+            active_count = self.data_manager.get_active_image_count()
+            ui_refs['stats_label'].config(
+                text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
+            )
+            
+            if ui_refs.get('status_bar'):
+                ui_refs['status_bar'].config(
+                    text=f"Purge complete: {result['total_removed']} vote(s) removed from {result['total_affected']} image(s)"
+                )
+            
+            if result['total_removed'] > 0:
+                messagebox.showinfo(
+                    "Purge Complete",
+                    f"Purged votes from {result['binned_processed']} binned image(s):\n\n"
+                    f"• {result['total_removed']} stale vote(s) removed\n"
+                    f"• {result['total_affected']} active image(s) recalculated\n\n"
+                    f"Save your progress to persist these changes."
+                )
+            else:
+                messagebox.showinfo(
+                    "Already Clean",
+                    f"Checked {result['binned_processed']} binned image(s) — no stale votes found.\n\n"
+                    f"All active images are already clean."
+                )
+            
+            print(f"MainWindow: Vote purge completed: {result}")
+            
+        except Exception as e:
+            print(f"MainWindow: Error purging binned votes: {e}")
+            messagebox.showerror("Purge Error", f"Failed to purge binned votes:\n{str(e)}")
     
     def load_data(self) -> None:
         """Load ranking data from file with error handling."""

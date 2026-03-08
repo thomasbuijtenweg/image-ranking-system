@@ -215,6 +215,12 @@ class VotingController:
             print(f"VotingController: Added {loser} to new binned_images set")
         
         if success:
+            # Purge votes involving the binned image from all active images
+            purge_result = None
+            if hasattr(self.data_manager, 'purge_binned_image_votes'):
+                purge_result = self.data_manager.purge_binned_image_votes(loser)
+                print(f"VotingController: Vote purge result: {purge_result}")
+            
             # Move the physical file
             print(f"VotingController: Attempting to move file {loser} to bin")
             move_success, error_msg = self.image_binner.move_image_to_bin(loser)
@@ -224,9 +230,13 @@ class VotingController:
                 # Update UI
                 self._update_stats_display()
                 
+                purge_info = ""
+                if purge_result:
+                    purge_info = f" | Purged {purge_result['total_votes_removed']} vote(s) from {purge_result['affected_images']} image(s)"
+                
                 if self.status_bar:
                     self.status_bar.config(
-                        text=f"Binned: {loser} moved to Bin folder (last loser vs {winner})"
+                        text=f"Binned: {loser} moved to Bin folder (last loser vs {winner}){purge_info}"
                     )
                 
                 print(f"VotingController: Successfully binned last loser: {loser}")
@@ -423,6 +433,11 @@ class VotingController:
             print(f"VotingController: Added {loser} to new binned_images set")
         
         if success:
+            # Purge votes involving the binned image from all active images
+            if hasattr(self.data_manager, 'purge_binned_image_votes'):
+                purge_result = self.data_manager.purge_binned_image_votes(loser)
+                print(f"VotingController: Vote purge result: {purge_result}")
+            
             # Move the physical file
             print(f"VotingController: Attempting to move file {loser} to bin")
             move_success, error_msg = self.image_binner.move_image_to_bin(loser)
@@ -432,9 +447,13 @@ class VotingController:
                 # Update UI
                 self._update_stats_display()
                 
+                purge_info = ""
+                if hasattr(self.data_manager, 'purge_binned_image_votes') and purge_result:
+                    purge_info = f" | Purged {purge_result['total_votes_removed']} vote(s) from {purge_result['affected_images']} image(s)"
+                
                 if self.status_bar:
                     self.status_bar.config(
-                        text=f"Vote + Bin: {winner} beats {loser} → {loser} binned to Bin folder"
+                        text=f"Vote + Bin: {winner} beats {loser} → {loser} binned{purge_info}"
                     )
                 
                 print(f"VotingController: Vote and bin successful: {winner} beats {loser}, {loser} binned")
