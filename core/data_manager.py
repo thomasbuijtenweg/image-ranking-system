@@ -8,6 +8,7 @@ from config import Defaults
 from core.weight_manager import WeightManager
 from core.data_persistence import DataPersistence
 from core.algorithm_settings import AlgorithmSettings
+from core.similarity_manager import SimilarityManager
 
 
 class DataManager:
@@ -17,6 +18,7 @@ class DataManager:
         self.weight_manager = WeightManager()
         self.data_persistence = DataPersistence()
         self.algorithm_settings = AlgorithmSettings()
+        self.similarity_manager = SimilarityManager()
         self.reset_data()
     
     def reset_data(self):
@@ -304,6 +306,10 @@ class DataManager:
         # Load other settings
         self.weight_manager.load_from_data(data)
         self.algorithm_settings.load_settings(data)
+        
+        # Load similarity cache if one exists for this folder
+        if self.image_folder:
+            self.similarity_manager.load_cache(self.image_folder)
         
         # Update existing images with strategic timing
         self._update_existing_images_with_strategic_timing()

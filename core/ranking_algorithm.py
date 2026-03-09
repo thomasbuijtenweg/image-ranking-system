@@ -56,8 +56,7 @@ class RankingAlgorithm:
             
             if hard_excluded:
                 print(f"\n[Hard Vote Ceiling] Avg votes: {avg_votes:.1f} | Threshold: {hard_limit_threshold:.1f} "
-                      f"(×{hard_limit_multiplier}) | Excluded {len(hard_excluded)} image(s): "
-                      f"{', '.join(hard_excluded[:5])}{'...' if len(hard_excluded) > 5 else ''}")
+                      f"(×{hard_limit_multiplier}) | Excluded {len(hard_excluded)} image(s)")
             
             # Only apply the hard limit if it still leaves enough images to vote on
             if len(votable_images) >= 2:
@@ -281,7 +280,7 @@ class RankingAlgorithm:
         print(f"Weight: 50% Confidence (inverted) + 20% Recency + 30% Vote Deficiency  →  × Overvote Penalty")
         print(f"Min votes threshold: {min_votes_threshold} | Avg votes: {avg_votes:.1f} | Max votes threshold: {dynamic_max_votes_threshold:.1f} (×{max_votes_multiplier})\n")
         
-        top_candidates = combined_scores[:min(3, len(combined_scores))]
+        top_candidates = combined_scores[:min(2, len(combined_scores))]
         for i, (score, conf, recency, votes, vote_def, tier_stab, tier_hist, ov_mult, img) in enumerate(top_candidates):
             status = "✓ SELECTED" if i == 0 else "  Runner-up"
             conf_contribution = (1.0 - conf) * 0.5
@@ -292,7 +291,10 @@ class RankingAlgorithm:
             
             under_tested_marker = " [UNDER-TESTED]" if votes < min_votes_threshold else ""
             overvoted_marker = " [OVERVOTED]" if ov_mult < 1.0 else ""
-            
+
+            # Image description
+            img_stats = self.data_manager.get_image_stats(img)
+
             print(f"{status} #{i+1}: {img}{under_tested_marker}{overvoted_marker}")
             print(f"    Combined Score: {score:.4f}")
             
@@ -346,7 +348,22 @@ class RankingAlgorithm:
         # Dynamic avg votes for overvote penalty
         active_images_all = self.data_manager.get_active_images()
         avg_votes = self._calculate_dynamic_avg_votes(active_images_all)
-        
+
+        # Similarity scores for the whole candidate pool (instant matrix op)
+        sim_manager = self.data_manager.similarity_manager
+        similarity_ready = sim_manager.is_ready
+        w_vis  = self.data_manager.algorithm_settings.sim_weight_visual
+        w_tex  = self.data_manager.algorithm_settings.sim_weight_text
+        w_tags = self.data_manager.algorithm_settings.sim_weight_tags
+        if similarity_ready:
+            sim_scores_raw = sim_manager.get_similar_images(
+                exclude_image, available_images, top_n=len(available_images),
+                w_visual=w_vis, w_text=w_tex, w_tags=w_tags
+            )
+            sim_lookup = {name: score for name, score in sim_scores_raw}
+        else:
+            sim_lookup = {}
+
         for img in available_images:
             confidence = self._calculate_image_confidence(img)
             stats = self.data_manager.get_image_stats(img)
@@ -363,60 +380,150 @@ class RankingAlgorithm:
             time_factor = time_since_voted / max_time if max_time > 0 else 0
             
             tier_stability = self._calculate_tier_stability(img)
+
+            # Similarity to the left (query) image
+            similarity = sim_lookup.get(img, 0.5)
+
+            if similarity_ready:
+                # 50% similarity + 30% recency + 20% confidence
+                base_score = (similarity * 0.5) + (time_factor * 0.3) + (confidence * 0.2)
+            else:
+                # Original weights when no index exists
+                base_score = (confidence * 0.4) + (time_factor * 0.6)
             
-            base_score = (confidence * 0.4) + (time_factor * 0.6)
-            
-            # Apply overvote penalty so heavily-voted images also step back as reference partners
             overvote_penalty_multiplier = self._calculate_overvote_penalty(votes, avg_votes)
             combined_score = base_score * overvote_penalty_multiplier
             
-            scored_images.append((combined_score, confidence, time_since_voted, votes, tier_stability, tier_history, overvote_penalty_multiplier, img))
+            scored_images.append((combined_score, confidence, time_since_voted, votes,
+                                   tier_stability, tier_history, overvote_penalty_multiplier,
+                                   similarity, img))
         
         scored_images.sort(key=lambda x: x[0], reverse=True)
         
+        # Fetch left image description for context
+        left_stats = self.data_manager.get_image_stats(exclude_image)
+        left_prompt = left_stats.get('prompt') or left_stats.get('display_metadata') or "(no description)"
+        left_prompt_short = left_prompt[:120] + "…" if len(left_prompt) > 120 else left_prompt
+
+        sim_mode = "50% Similarity + 30% Recency + 20% Confidence" if similarity_ready else "40% Confidence + 60% Recency (no index)"
         print("\n=== RIGHT Image Selection (Recency Priority + High Confidence) ===")
         print(f"Tier {tier} has {len(scored_images)} candidates (excluding LEFT image)")
-        print(f"Weight: 40% Confidence + 60% Recency  →  × Overvote Penalty")
-        print(f"Avg votes: {avg_votes:.1f} | Max votes threshold: {avg_votes * max_votes_multiplier:.1f} (×{max_votes_multiplier})\n")
+        print(f"Weight: {sim_mode}  →  × Overvote Penalty")
+        print(f"Avg votes: {avg_votes:.1f} | Max votes threshold: {avg_votes * max_votes_multiplier:.1f} (×{max_votes_multiplier})")
+        print(f"LEFT image : {exclude_image}")
+
+
         
-        top_candidates = scored_images[:min(3, len(scored_images))]
-        for i, (score, conf, recency, votes, tier_stab, tier_hist, ov_mult, img) in enumerate(top_candidates):
+        top_candidates = scored_images[:min(2, len(scored_images))]
+        for i, (score, conf, recency, votes, tier_stab, tier_hist, ov_mult, similarity, img) in enumerate(top_candidates):
             status = "✓ SELECTED" if i == 0 else "  Runner-up"
-            conf_contribution = conf * 0.4
             recency_normalized = recency / max(1, current_vote_count + 1)
-            recency_contribution = recency_normalized * 0.6
-            base = conf_contribution + recency_contribution
             overvoted_marker = " [OVERVOTED]" if ov_mult < 1.0 else ""
             
+            # Candidate description
+            cand_stats = self.data_manager.get_image_stats(img)
+            cand_prompt = cand_stats.get('prompt') or cand_stats.get('display_metadata') or "(no description)"
+            cand_prompt_short = cand_prompt[:120] + "…" if len(cand_prompt) > 120 else cand_prompt
+
             print(f"{status} #{i+1}: {img}{overvoted_marker}")
+            if similarity_ready:
+                sim_pct = similarity * 100
+                bar_filled = int(sim_pct / 5)
+                sim_bar = "█" * bar_filled + "░" * (20 - bar_filled)
+                print(f"    CLIP Similarity to LEFT: {sim_pct:5.1f}%  [{sim_bar}]  → Contribution: {similarity * 0.5:.4f}")
             print(f"    Combined Score: {score:.4f}")
             
             if votes > 0:
-                effective_stability = tier_stab / math.sqrt(votes) if votes > 0 else 0
-                print(f"    - Confidence: {conf:.4f}")
-                print(f"        • Tier History: {tier_hist}")
-                print(f"        • Tier Stability (stdev): {tier_stab:.4f}")
-                print(f"        • Vote Count: {votes} → sqrt({votes}) = {math.sqrt(votes):.4f}")
-                print(f"        • Effective Stability: {tier_stab:.4f} / {math.sqrt(votes):.4f} = {effective_stability:.4f}")
-                print(f"        • Confidence Formula: 1 / (1 + {effective_stability:.4f}) = {conf:.4f}")
+                print(f"    - Confidence: {conf:.4f} (stdev={tier_stab:.3f}, votes={votes}) → Contribution: {conf * (0.2 if similarity_ready else 0.4):.4f}")
             else:
-                print(f"    - Confidence: {conf:.4f} (0 votes = 0 confidence)")
+                print(f"    - Confidence: {conf:.4f} (0 votes)")
             
-            print(f"        → Contribution: {conf_contribution:.4f} (40%)")
-            print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_contribution:.4f} (60%)")
-            print(f"    - Base score: {base:.4f}  × Overvote Penalty Multiplier: {ov_mult:.4f}  = {score:.4f}")
+            print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_normalized * (0.3 if similarity_ready else 0.6):.4f}")
+            print(f"    - Overvote Penalty: ×{ov_mult:.4f}  → Final: {score:.4f}")
             
             if i == 0 and len(scored_images) > 1:
-                margin = score - scored_images[1][0]
-                print(f"    ▶ Won by margin: {margin:.4f}")
+                print(f"    ▶ Won by margin: {score - scored_images[1][0]:.4f}")
             elif i > 0:
-                deficit = scored_images[0][0] - score
-                print(f"    ▶ Lost by margin: {deficit:.4f}")
+                print(f"    ▶ Lost by margin: {scored_images[0][0] - score:.4f}")
             print()
         
         print("=" * 60)
-        
-        return scored_images[0][7]
+
+        selected_right = scored_images[0][8]
+
+        # --- CLIP concept + hybrid explanation for the selected pair ---
+        if similarity_ready:
+            w_vis  = self.data_manager.algorithm_settings.sim_weight_visual
+            w_tex  = self.data_manager.algorithm_settings.sim_weight_text
+            w_tags = self.data_manager.algorithm_settings.sim_weight_tags
+            exp = sim_manager.explain_similarity(exclude_image, selected_right,
+                                                  w_visual=w_vis, w_text=w_tex, w_tags=w_tags)
+            print(f"\n  CLIP Hybrid Explanation  ({exclude_image}  ↔  {selected_right})")
+            print(f"  Hybrid: {exp['hybrid']*100:.1f}%  =  "
+                  f"Visual {exp['visual']*100:.1f}% (×{w_vis})  +  "
+                  f"Text {exp['text']*100:.1f}% (×{w_tex})  +  "
+                  f"Tags {exp['tags']*100:.1f}% (×{w_tags})\n")
+
+            # --- Tag breakdown per image ---
+            def _fmt_tags(tags: dict) -> str:
+                parts = []
+                for bucket in ('artists', 'roles', 'styles'):
+                    items = tags.get(bucket, {})
+                    if items:
+                        joined = ', '.join(f"{k} ({v:.1f})" for k, v in
+                                          sorted(items.items(), key=lambda x: -x[1]))
+                        parts.append(f"[{bucket}] {joined}")
+                return '  |  '.join(parts) if parts else "(none matched)"
+
+            tags_left  = exp.get('tags_a', {})
+            tags_right = exp.get('tags_b', {})
+            print(f"  Tags LEFT : {_fmt_tags(tags_left)}")
+            print(f"  Tags RIGHT: {_fmt_tags(tags_right)}")
+            if exp['shared_tags']:
+                shared_flat = []
+                for bucket, pairs in exp['shared_tags'].items():
+                    for label, score in pairs:
+                        shared_flat.append(f"{label} ({score:.2f})")
+                print(f"  Tags SHARED [{', '.join(exp['shared_tags'].keys())}]: "
+                      f"{', '.join(shared_flat)}")
+            else:
+                print(f"  Tags SHARED: (none)")
+            print()
+
+            # --- Text embedding context ---
+            sm_ref = sim_manager
+            left_clean  = sm_ref._clean_prompt_for_embedding(
+                self.data_manager.get_image_stats(exclude_image).get('prompt', '') or '')
+            right_clean = sm_ref._clean_prompt_for_embedding(
+                self.data_manager.get_image_stats(selected_right).get('prompt', '') or '')
+            left_has_tex  = (sm_ref.has_text is not None
+                             and exclude_image in sm_ref._index
+                             and bool(sm_ref.has_text[sm_ref._index[exclude_image]]))
+            right_has_tex = (sm_ref.has_text is not None
+                             and selected_right in sm_ref._index
+                             and bool(sm_ref.has_text[sm_ref._index[selected_right]]))
+            tex_status = "✅" if (left_has_tex and right_has_tex) else "⚠️ (one or both missing)"
+            print(f"  Text similarity: {exp['text']*100:.1f}%  {tex_status}")
+            if left_clean:
+                print(f"  Text LEFT : {left_clean[:120]}{'…' if len(left_clean)>120 else ''}")
+            else:
+                print(f"  Text LEFT : (no prompt)")
+            if right_clean:
+                print(f"  Text RIGHT: {right_clean[:120]}{'…' if len(right_clean)>120 else ''}")
+            else:
+                print(f"  Text RIGHT: (no prompt)")
+            print()
+
+            # --- Shared CLIP visual concepts ---
+            if exp['shared_visual']:
+                print("  Shared CLIP visual concepts:")
+                for label, score in exp['shared_visual']:
+                    bar = "█" * int(score * 20) + "░" * (20 - int(score * 20))
+                    print(f"    {score*100:5.1f}%  [{bar}]  {label}")
+                print()
+
+
+        return selected_right
     
     def _has_untested_pairs(self, tier_images: List[str], 
                            exclude_pair: Optional[Tuple[str, str]] = None) -> bool:

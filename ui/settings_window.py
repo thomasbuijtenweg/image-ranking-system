@@ -23,6 +23,13 @@ class SettingsWindow:
         self.overflow_threshold_label = None
         self.min_overflow_images_var = None
         self.min_overflow_images_label = None
+        
+        # Similarity index UI state
+        self._sim_build_thread = None
+        self._sim_progress_label = None
+        self._sim_status_label = None
+        self._sim_build_btn = None
+        self._sim_update_btn = None
     
     def show(self):
         """Show the settings window."""
@@ -93,6 +100,7 @@ tiers to grow naturally based on the collection's quality distribution."""
         # Settings sections
         self.create_tier_distribution_section(parent)
         self.create_overflow_detection_section(parent)
+        self.create_similarity_section(parent)
         self.create_status_section(parent)
         
         # Apply button
@@ -371,6 +379,7 @@ Tier Analysis:"""
         self.update_tier_std_display()
         self.update_overflow_threshold_display()
         self.update_min_overflow_images_display()
+        self.update_similarity_status_display()
         self.update_status_display()
     
     def apply_changes(self):
@@ -386,6 +395,173 @@ Tier Analysis:"""
         messagebox.showinfo("Success", f"Settings updated successfully!\n\nChanges will take effect immediately and will be saved when you save your progress.")
         self.close_window()
     
+    def create_similarity_section(self, parent: tk.Frame):
+        """Create the visual similarity index section."""
+        section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
+        section.pack(fill=tk.X, padx=10, pady=5)
+
+        tk.Label(section, text="Visual Similarity Index (CLIP)",
+                 font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY,
+                 bg=Colors.BG_SECONDARY).pack(pady=10)
+
+        desc = ("When the index is built, the algorithm prefers pairing visually similar images "
+                "together (30% similarity + 40% recency + 30% confidence). "
+                "Without an index the original weights are used (60% recency + 40% confidence).\n"
+                "Building takes 5–15 min for large datasets on CPU (seconds on GPU). "
+                "Use 'Update' to add only newly added images.")
+        tk.Label(section, text=desc, font=('Arial', 10, 'italic'),
+                 fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY,
+                 wraplength=850, justify=tk.LEFT).pack(padx=10, pady=5)
+
+        # Status line
+        self._sim_status_label = tk.Label(section, text="Status: checking…",
+                                          font=('Arial', 10), fg=Colors.TEXT_PRIMARY,
+                                          bg=Colors.BG_SECONDARY)
+        self._sim_status_label.pack(padx=10, anchor=tk.W)
+
+        # Progress line (hidden until a build starts)
+        self._sim_progress_label = tk.Label(section, text="",
+                                             font=('Arial', 10), fg=Colors.TEXT_WARNING,
+                                             bg=Colors.BG_SECONDARY)
+        self._sim_progress_label.pack(padx=10, anchor=tk.W)
+
+        # Buttons
+        btn_frame = tk.Frame(section, bg=Colors.BG_SECONDARY)
+        btn_frame.pack(pady=10)
+
+        self._sim_build_btn = tk.Button(btn_frame, text="Build Full Index",
+                                         command=self._start_build_index,
+                                         bg=Colors.BUTTON_INFO, fg='white',
+                                         font=('Arial', 11), relief=tk.FLAT, width=18)
+        self._sim_build_btn.pack(side=tk.LEFT, padx=5)
+
+        self._sim_update_btn = tk.Button(btn_frame, text="Update Index (new images only)",
+                                          command=self._start_update_index,
+                                          bg=Colors.BUTTON_NEUTRAL, fg='white',
+                                          font=('Arial', 11), relief=tk.FLAT, width=28)
+        self._sim_update_btn.pack(side=tk.LEFT, padx=5)
+
+        self.update_similarity_status_display()
+
+    def update_similarity_status_display(self):
+        """Refresh the similarity status label."""
+        if self._sim_status_label is None:
+            return
+
+        sm = self.data_manager.similarity_manager
+        folder = self.data_manager.image_folder
+
+        if not folder:
+            self._sim_status_label.config(
+                text="Status: No image folder loaded yet.", fg=Colors.TEXT_SECONDARY)
+            return
+
+        total_images = len(self.data_manager.image_stats)
+        if sm.is_ready:
+            missing = sm.count_missing(list(self.data_manager.image_stats.keys()))
+            disc_total = sum(len(v) for v in sm.discovered_vocab.values()) if hasattr(sm, 'discovered_vocab') else 0
+            disc_info = f", {disc_total} discovered vocab terms" if disc_total else ""
+            colour = Colors.TEXT_SUCCESS if missing == 0 else Colors.TEXT_WARNING
+            self._sim_status_label.config(
+                text=f"Status: ✅ Index ready — {len(sm.filenames)} embeddings"
+                     f"{disc_info}"
+                     f"{' (' + str(missing) + ' image(s) not yet indexed)' if missing else ' — all images covered'}",
+                fg=colour)
+        else:
+            self._sim_status_label.config(
+                text=f"Status: ⚠️  No index — {total_images} images need embedding. "
+                     f"Click 'Build Full Index' to start.",
+                fg=Colors.TEXT_WARNING)
+
+    def _get_image_list(self):
+        """Return a list of all image filenames currently tracked by the data manager."""
+        return list(self.data_manager.image_stats.keys())
+
+    def _get_prompt_lookup(self):
+        """Return {filename: prompt} for all tracked images."""
+        return {
+            name: (stats.get('prompt') or '')
+            for name, stats in self.data_manager.image_stats.items()
+        }
+
+    def _start_build_index(self):
+        """Kick off a full index build in the background."""
+        folder = self.data_manager.image_folder
+        if not folder:
+            messagebox.showwarning("No Folder", "Please load an image folder first.")
+            return
+
+        if self._sim_build_thread and self._sim_build_thread.is_alive():
+            messagebox.showinfo("In Progress", "Index build is already running.")
+            return
+
+        self._sim_build_btn.config(state=tk.DISABLED)
+        self._sim_update_btn.config(state=tk.DISABLED)
+        self._sim_progress_label.config(text="Starting build…")
+
+        def progress(current, total, name):
+            if self.window and self.window.winfo_exists():
+                pct = int(current / max(total, 1) * 100)
+                msg = f"Embedding {current}/{total} ({pct}%)  —  {name}" if name != "done" else ""
+                self.window.after(0, lambda m=msg: self._sim_progress_label.config(text=m))
+
+        def completion(success, message):
+            if self.window and self.window.winfo_exists():
+                def _finish():
+                    self._sim_progress_label.config(text="")
+                    self._sim_build_btn.config(state=tk.NORMAL)
+                    self._sim_update_btn.config(state=tk.NORMAL)
+                    self.update_similarity_status_display()
+                    if success:
+                        messagebox.showinfo("Index Built", message)
+                    else:
+                        messagebox.showerror("Build Failed", message)
+                self.window.after(0, _finish)
+
+        image_names = self._get_image_list()
+        prompt_lookup = self._get_prompt_lookup()
+        self._sim_build_thread = self.data_manager.similarity_manager.build_index_async(
+            folder, image_names, prompt_lookup, progress, completion)
+
+    def _start_update_index(self):
+        """Kick off an incremental index update in the background."""
+        folder = self.data_manager.image_folder
+        if not folder:
+            messagebox.showwarning("No Folder", "Please load an image folder first.")
+            return
+
+        if self._sim_build_thread and self._sim_build_thread.is_alive():
+            messagebox.showinfo("In Progress", "An index operation is already running.")
+            return
+
+        self._sim_build_btn.config(state=tk.DISABLED)
+        self._sim_update_btn.config(state=tk.DISABLED)
+        self._sim_progress_label.config(text="Checking for new images…")
+
+        def progress(current, total, name):
+            if self.window and self.window.winfo_exists():
+                pct = int(current / max(total, 1) * 100)
+                msg = f"Embedding {current}/{total} ({pct}%)  —  {name}" if name != "done" else ""
+                self.window.after(0, lambda m=msg: self._sim_progress_label.config(text=m))
+
+        def completion(success, message):
+            if self.window and self.window.winfo_exists():
+                def _finish():
+                    self._sim_progress_label.config(text="")
+                    self._sim_build_btn.config(state=tk.NORMAL)
+                    self._sim_update_btn.config(state=tk.NORMAL)
+                    self.update_similarity_status_display()
+                    if success:
+                        messagebox.showinfo("Index Updated", message)
+                    else:
+                        messagebox.showerror("Update Failed", message)
+                self.window.after(0, _finish)
+
+        image_names = self._get_image_list()
+        prompt_lookup = self._get_prompt_lookup()
+        self._sim_build_thread = self.data_manager.similarity_manager.update_index_async(
+            folder, image_names, prompt_lookup, progress, completion)
+
     def close_window(self):
         """Handle window closing."""
         if self.window:

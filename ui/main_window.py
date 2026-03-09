@@ -423,6 +423,11 @@ class MainWindow:
                     self.data_manager.weight_manager.load_from_data(data)
                     self.data_manager.algorithm_settings.load_settings(data)
                     
+                    # Load similarity cache if one exists for this folder
+                    if self.data_manager.image_folder:
+                        sm = self.data_manager.similarity_manager
+                        sm.load_cache(self.data_manager.image_folder)
+                    
                     # Load filter state if present
                     if 'filter_state' in data and self.filter_manager:
                         print("MainWindow: Restoring filter state...")
@@ -455,6 +460,42 @@ class MainWindow:
                         filter_stats = self.filter_manager.get_filter_stats()
                         print(f"MainWindow: Filters restored - {len(filter_stats['include_words'])} include, {len(filter_stats['exclude_words'])} exclude")
                     
+                    # Report similarity index status and auto-index if needed
+                    sm = self.data_manager.similarity_manager
+                    all_images = list(self.data_manager.image_stats.keys())
+                    folder = self.data_manager.image_folder
+                    ui_refs = self.ui_builder.get_ui_references()
+
+                    if sm.is_ready and not getattr(sm, 'is_legacy', False):
+                        missing = sm.count_missing(all_images)
+                        if missing == 0:
+                            sim_msg = (f"Similarity index loaded "
+                                       f"({len(sm.filenames)} embeddings — all images covered).")
+                            print(f"MainWindow: {sim_msg}")
+                            if ui_refs.get('status_bar'):
+                                ui_refs['status_bar'].config(text=sim_msg)
+                        else:
+                            sim_msg = (f"Similarity index loaded ({len(sm.filenames)} embeddings) — "
+                                       f"{missing} new image(s) found, updating index in background…")
+                            print(f"MainWindow: {sim_msg}")
+                            if ui_refs.get('status_bar'):
+                                ui_refs['status_bar'].config(text=sim_msg)
+                            self._auto_update_similarity_index(folder, all_images)
+                    elif sm.is_ready and getattr(sm, 'is_legacy', False):
+                        sim_msg = (f"Legacy similarity index found ({len(sm.filenames)} visual-only embeddings) — "
+                                   f"upgrading to full hybrid index in background…")
+                        print(f"MainWindow: {sim_msg}")
+                        if ui_refs.get('status_bar'):
+                            ui_refs['status_bar'].config(text=sim_msg)
+                        self._auto_build_similarity_index(folder, all_images)
+                    else:
+                        sim_msg = (f"No similarity index found — "
+                                   f"building index for {len(all_images)} images in background…")
+                        print(f"MainWindow: {sim_msg}")
+                        if ui_refs.get('status_bar'):
+                            ui_refs['status_bar'].config(text=sim_msg)
+                        self._auto_build_similarity_index(folder, all_images)
+                    
                     print(f"MainWindow: Data loaded successfully")
                 else:
                     print(f"MainWindow: Failed to load data from {filename}: {error_msg}")
@@ -462,6 +503,68 @@ class MainWindow:
             print(f"MainWindow: Error loading data: {e}")
             messagebox.showerror("Load Error", f"Failed to load data:\n{str(e)}")
     
+    def _auto_build_similarity_index(self, folder: str, image_names: list) -> None:
+        """Kick off a full similarity index build in the background (no UI prompts)."""
+        sm = self.data_manager.similarity_manager
+        ui_refs = self.ui_builder.get_ui_references()
+        status_bar = ui_refs.get('status_bar')
+
+        prompt_lookup = {
+            name: (self.data_manager.image_stats.get(name, {}).get('prompt') or '')
+            for name in image_names
+        }
+
+        def progress(current, total, name):
+            if current % 25 == 0 or current == total:
+                pct = int(current / max(total, 1) * 100)
+                msg = (f"Building similarity index: {current}/{total} ({pct}%)…"
+                       if name != "done" else "")
+                print(f"[SimilarityManager] {msg}")
+                if status_bar:
+                    self.root.after(0, lambda m=msg: status_bar.config(text=m) if m else None)
+
+        def completion(success, message):
+            print(f"[SimilarityManager] Auto-build complete: {message}")
+            if status_bar:
+                final = (f"✅ Similarity index built ({len(sm.filenames)} embeddings). "
+                         f"Visual similarity pairing is now active."
+                         if success else
+                         f"⚠️ Similarity index build failed: {message}")
+                self.root.after(0, lambda: status_bar.config(text=final))
+
+        sm.build_index_async(folder, image_names, prompt_lookup, progress, completion)
+
+    def _auto_update_similarity_index(self, folder: str, image_names: list) -> None:
+        """Kick off an incremental index update in the background (no UI prompts)."""
+        sm = self.data_manager.similarity_manager
+        ui_refs = self.ui_builder.get_ui_references()
+        status_bar = ui_refs.get('status_bar')
+
+        prompt_lookup = {
+            name: (self.data_manager.image_stats.get(name, {}).get('prompt') or '')
+            for name in image_names
+        }
+
+        def progress(current, total, name):
+            if current % 25 == 0 or current == total:
+                pct = int(current / max(total, 1) * 100)
+                msg = (f"Updating similarity index: {current}/{total} ({pct}%)…"
+                       if name != "done" else "")
+                print(f"[SimilarityManager] {msg}")
+                if status_bar:
+                    self.root.after(0, lambda m=msg: status_bar.config(text=m) if m else None)
+
+        def completion(success, message):
+            print(f"[SimilarityManager] Auto-update complete: {message}")
+            if status_bar:
+                final = (f"✅ Similarity index updated ({len(sm.filenames)} embeddings total). "
+                         f"Visual similarity pairing is now active."
+                         if success else
+                         f"⚠️ Similarity index update failed: {message}")
+                self.root.after(0, lambda: status_bar.config(text=final))
+
+        sm.update_index_async(folder, image_names, prompt_lookup, progress, completion)
+
     def show_detailed_stats(self) -> None:
         """Show the detailed statistics window with error handling."""
         try:

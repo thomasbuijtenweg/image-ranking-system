@@ -15,6 +15,9 @@ class AlgorithmSettings:
     DEFAULT_MIN_VOTES_FOR_STABILITY = 6
     DEFAULT_MAX_VOTES_MULTIPLIER = 1.5
     DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER = 2.0
+    DEFAULT_SIM_WEIGHT_VISUAL = 0.50
+    DEFAULT_SIM_WEIGHT_TEXT   = 0.30
+    DEFAULT_SIM_WEIGHT_TAGS   = 0.20
     
     # Valid ranges for settings
     VALID_RANGES = {
@@ -25,7 +28,10 @@ class AlgorithmSettings:
         'min_overflow_images': (1, 20),
         'min_votes_for_stability': (1, 50),
         'max_votes_multiplier': (1.0, 5.0),
-        'max_votes_hard_limit_multiplier': (1.5, 10.0)
+        'max_votes_hard_limit_multiplier': (1.5, 10.0),
+        'sim_weight_visual': (0.0, 1.0),
+        'sim_weight_text':   (0.0, 1.0),
+        'sim_weight_tags':   (0.0, 1.0),
     }
     
     def __init__(self):
@@ -41,6 +47,9 @@ class AlgorithmSettings:
         self.min_votes_for_stability = self.DEFAULT_MIN_VOTES_FOR_STABILITY
         self.max_votes_multiplier = self.DEFAULT_MAX_VOTES_MULTIPLIER
         self.max_votes_hard_limit_multiplier = self.DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER
+        self.sim_weight_visual = self.DEFAULT_SIM_WEIGHT_VISUAL
+        self.sim_weight_text   = self.DEFAULT_SIM_WEIGHT_TEXT
+        self.sim_weight_tags   = self.DEFAULT_SIM_WEIGHT_TAGS
     
     def validate_setting(self, setting_name: str, value: Any) -> bool:
         """
@@ -111,7 +120,10 @@ class AlgorithmSettings:
                 'min_votes_for_stability': self.min_votes_for_stability,
                 'max_votes_multiplier': self.max_votes_multiplier,
                 'max_votes_hard_limit_multiplier': self.max_votes_hard_limit_multiplier,
-                'algorithm_version': '2.4'
+                'sim_weight_visual': self.sim_weight_visual,
+                'sim_weight_text':   self.sim_weight_text,
+                'sim_weight_tags':   self.sim_weight_tags,
+                'algorithm_version': '2.5'
             }
         }
     
@@ -137,6 +149,12 @@ class AlgorithmSettings:
                           settings.get('max_votes_multiplier', self.DEFAULT_MAX_VOTES_MULTIPLIER))
             self.set_value('max_votes_hard_limit_multiplier',
                           settings.get('max_votes_hard_limit_multiplier', self.DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER))
+            self.set_value('sim_weight_visual',
+                          settings.get('sim_weight_visual', self.DEFAULT_SIM_WEIGHT_VISUAL))
+            self.set_value('sim_weight_text',
+                          settings.get('sim_weight_text', self.DEFAULT_SIM_WEIGHT_TEXT))
+            self.set_value('sim_weight_tags',
+                          settings.get('sim_weight_tags', self.DEFAULT_SIM_WEIGHT_TAGS))
             
             print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.2')}")
         else:
@@ -193,6 +211,24 @@ class AlgorithmSettings:
                 'default': self.DEFAULT_MAX_VOTES_HARD_LIMIT_MULTIPLIER,
                 'range': self.VALID_RANGES['max_votes_hard_limit_multiplier'],
                 'description': 'Images with votes > avg_votes * this multiplier are excluded entirely from voting'
+            },
+            'sim_weight_visual': {
+                'value': self.sim_weight_visual,
+                'default': self.DEFAULT_SIM_WEIGHT_VISUAL,
+                'range': self.VALID_RANGES['sim_weight_visual'],
+                'description': 'Weight of CLIP visual similarity in hybrid score (should sum to 1 with text+tags)'
+            },
+            'sim_weight_text': {
+                'value': self.sim_weight_text,
+                'default': self.DEFAULT_SIM_WEIGHT_TEXT,
+                'range': self.VALID_RANGES['sim_weight_text'],
+                'description': 'Weight of CLIP prompt-text similarity in hybrid score'
+            },
+            'sim_weight_tags': {
+                'value': self.sim_weight_tags,
+                'default': self.DEFAULT_SIM_WEIGHT_TAGS,
+                'range': self.VALID_RANGES['sim_weight_tags'],
+                'description': 'Weight of structured tag overlap (artists/roles/styles) in hybrid score'
             }
         }
     
@@ -207,4 +243,7 @@ class AlgorithmSettings:
         new_settings.min_votes_for_stability = self.min_votes_for_stability
         new_settings.max_votes_multiplier = self.max_votes_multiplier
         new_settings.max_votes_hard_limit_multiplier = self.max_votes_hard_limit_multiplier
+        new_settings.sim_weight_visual = self.sim_weight_visual
+        new_settings.sim_weight_text   = self.sim_weight_text
+        new_settings.sim_weight_tags   = self.sim_weight_tags
         return new_settings

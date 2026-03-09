@@ -11,5 +11,7 @@ from .data_persistence import DataPersistence
 from .algorithm_settings import AlgorithmSettings
 from .image_binner import ImageBinner
 
-__all__ = ['DataManager', 'ImageProcessor', 'RankingAlgorithm', 'PromptAnalyzer', 'MetadataExtractor', 'WeightManager', 'ConfidenceCalculator', 'DataPersistence', 'AlgorithmSettings', 'ImageBinner']
+from .similarity_manager import SimilarityManager
+
+__all__ = ['DataManager', 'ImageProcessor', 'RankingAlgorithm', 'PromptAnalyzer', 'MetadataExtractor', 'WeightManager', 'ConfidenceCalculator', 'DataPersistence', 'AlgorithmSettings', 'ImageBinner', 'SimilarityManager']
 __version__ = '1.0.0'
