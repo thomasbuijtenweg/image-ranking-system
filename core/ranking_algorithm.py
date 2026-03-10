@@ -66,21 +66,46 @@ class RankingAlgorithm:
                       f"suspending hard limit for this round.")
         if len(active_images) < 2:
             return None, None
-        
-        # Find overflowing tiers (using only active images)
-        overflowing_tiers = self._find_overflowing_tiers(active_images)
-        
+
+        # --- Cutline zone filter: when active, only pair boundary images ---
+        # confirmed_in / confirmed_out images have enough evidence and are excluded.
+        # Falls back to full pool when target_count=0 (cutline disabled).
+        cutline_tier = self.data_manager.get_cutline_tier()
+        if cutline_tier is not None:
+            zone_filtered = [
+                img for img in active_images
+                if self.data_manager.get_zone(img) == 'boundary'
+            ]
+            if len(zone_filtered) >= 2:
+                pairing_images = zone_filtered
+                print(f"[Cutline] Active — Tier {cutline_tier} | "
+                      f"Boundary pool: {len(pairing_images)} of {len(active_images)} images")
+            else:
+                pairing_images = active_images   # safety fallback
+                print(f"[Cutline] Too few boundary images ({len(zone_filtered)}), "
+                      f"using full pool")
+        else:
+            pairing_images = active_images       # cutline disabled
+
+        # Find overflowing tiers (using only pairing images)
+        overflowing_tiers = self._find_overflowing_tiers(pairing_images)
+
         if not overflowing_tiers:
-            # If no overflowing tiers, fall back to random selection
-            return self._fallback_random_selection(active_images, exclude_pair)
-        
-        # Sort overflowing tiers by priority (lowest first)
-        sorted_overflowing_tiers = sorted(overflowing_tiers)
-        
-        # Try each overflowing tier in order (lowest first)
+            return self._fallback_random_selection(pairing_images, exclude_pair)
+
+        # Sort overflowing tiers by priority
+        if cutline_tier is not None:
+            # Cutline mode: closest to cutline first
+            sorted_overflowing_tiers = self._sort_tiers_by_cutline_distance(
+                overflowing_tiers, cutline_tier)
+        else:
+            # Disabled: existing lowest-first behaviour
+            sorted_overflowing_tiers = sorted(overflowing_tiers)
+
+        # Try each overflowing tier in order
         for selected_tier in sorted_overflowing_tiers:
             # Get images in selected tier
-            tier_images = [img for img in active_images 
+            tier_images = [img for img in pairing_images
                         if self.data_manager.get_image_stats(img).get('current_tier', 0) == selected_tier]
             
             if len(tier_images) < 2:
@@ -126,6 +151,13 @@ class RankingAlgorithm:
         # If we couldn't find an untested pair in any overflow tier, fall back to random
         return self._fallback_random_selection(active_images, exclude_pair)
     
+    def _sort_tiers_by_cutline_distance(
+            self, overflowing_tiers: List[int], cutline_tier: int) -> List[int]:
+        """Sort overflowing tiers by distance from cutline (closest first).
+        Ties broken by lower tier value first, matching existing lowest-first behaviour."""
+        return sorted(overflowing_tiers,
+                      key=lambda t: (abs(t - cutline_tier), t))
+
     def _find_overflowing_tiers(self, active_images: List[str]) -> List[int]:
         """Find tiers that have more ACTIVE images than expected based on normal distribution.
         Uses dynamic mean centering for more adaptive tier management."""

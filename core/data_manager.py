@@ -350,6 +350,88 @@ class DataManager:
             'untested_pairs_remaining': total_possible_pairs - total_pairs_tested
         }
     
+    # ------------------------------------------------------------------
+    # Cutline zone methods
+    # ------------------------------------------------------------------
+
+    def get_cutline_tier(self) -> Optional[int]:
+        """Return the tier value at the cutline position.
+
+        The cutline tier T is the tier of the image that sits at position
+        target_count when all active images are sorted by tier descending.
+        Returns None when target_count is 0 (disabled) or the dataset is
+        smaller than target_count.
+        """
+        target = self.algorithm_settings.target_count
+        if target == 0:
+            return None
+        active = self.get_active_images()
+        if len(active) < target:
+            return None
+        sorted_by_tier = sorted(
+            active,
+            key=lambda img: self.image_stats[img].get('current_tier', 0),
+            reverse=True
+        )
+        return self.image_stats[sorted_by_tier[target - 1]].get('current_tier', 0)
+
+    def _get_zone_min_votes(self, tier_distance: int) -> int:
+        """Return the minimum votes required to confirm an image at tier_distance from cutline."""
+        base  = self.algorithm_settings.zone_base_votes
+        per_t = self.algorithm_settings.zone_votes_per_tier
+        return max(1, base + round(tier_distance * per_t))
+
+    def get_zone(self, image_name: str) -> str:
+        """Classify an image into a cutline zone.
+
+        Returns one of:
+          'eliminated'    – image is binned
+          'disabled'      – target_count == 0 (cutline system off)
+          'confirmed_in'  – tier >= cutline + buffer AND enough votes
+          'confirmed_out' – tier <= cutline - buffer AND enough votes
+          'boundary'      – everything else (near cutline, or too few votes)
+        """
+        if self.is_image_binned(image_name):
+            return 'eliminated'
+        cutline = self.get_cutline_tier()
+        if cutline is None:
+            return 'disabled'
+        stats  = self.get_image_stats(image_name)
+        tier   = stats.get('current_tier', 0)
+        votes  = stats.get('votes', 0)
+        buffer = self.algorithm_settings.cutline_buffer_tiers
+        if tier >= cutline + buffer:
+            min_v = self._get_zone_min_votes(tier - cutline)
+            if votes >= min_v:
+                return 'confirmed_in'
+        elif tier <= cutline - buffer:
+            min_v = self._get_zone_min_votes(cutline - tier)
+            if votes >= min_v:
+                return 'confirmed_out'
+        return 'boundary'
+
+    def get_zone_counts(self) -> Dict[str, Any]:
+        """Return a dict of zone counts and cutline metadata."""
+        counts = {'confirmed_in': 0, 'boundary': 0, 'confirmed_out': 0,
+                  'eliminated': 0, 'disabled': 0}
+        for img in self.image_stats:
+            zone = self.get_zone(img)
+            counts[zone] = counts.get(zone, 0) + 1
+        counts['cutline_tier']  = self.get_cutline_tier()
+        counts['target_count']  = self.algorithm_settings.target_count
+        counts['total_active']  = self.get_active_image_count()
+        return counts
+
+    def get_progress_summary(self) -> Dict[str, Any]:
+        """Return zone counts plus resolution percentage."""
+        counts    = self.get_zone_counts()
+        resolved  = counts['confirmed_in'] + counts['confirmed_out'] + counts['eliminated']
+        total     = counts['total_active'] + counts['eliminated']
+        resolution = (resolved / total * 100.0) if total > 0 else 0.0
+        counts['resolved']       = resolved
+        counts['resolution_pct'] = round(resolution, 1)
+        return counts
+
     def get_tier_distribution(self) -> Dict[int, int]:
         """Get the distribution of ACTIVE images across tiers."""
         if not hasattr(self, 'binned_images'):

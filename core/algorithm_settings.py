@@ -18,6 +18,10 @@ class AlgorithmSettings:
     DEFAULT_SIM_WEIGHT_VISUAL = 0.50
     DEFAULT_SIM_WEIGHT_TEXT   = 0.30
     DEFAULT_SIM_WEIGHT_TAGS   = 0.20
+    DEFAULT_TARGET_COUNT          = 0      # 0 = cutline system disabled
+    DEFAULT_CUTLINE_BUFFER_TIERS  = 2      # tiers either side of cutline = boundary zone
+    DEFAULT_ZONE_BASE_VOTES       = 5      # min votes before any image can be confirmed
+    DEFAULT_ZONE_VOTES_PER_TIER   = 0.5    # extra votes required per tier from cutline
     
     # Valid ranges for settings
     VALID_RANGES = {
@@ -32,6 +36,10 @@ class AlgorithmSettings:
         'sim_weight_visual': (0.0, 1.0),
         'sim_weight_text':   (0.0, 1.0),
         'sim_weight_tags':   (0.0, 1.0),
+        'target_count':         (0, 100000),
+        'cutline_buffer_tiers': (1, 10),
+        'zone_base_votes':      (1, 50),
+        'zone_votes_per_tier':  (0.0, 5.0),
     }
     
     def __init__(self):
@@ -50,6 +58,10 @@ class AlgorithmSettings:
         self.sim_weight_visual = self.DEFAULT_SIM_WEIGHT_VISUAL
         self.sim_weight_text   = self.DEFAULT_SIM_WEIGHT_TEXT
         self.sim_weight_tags   = self.DEFAULT_SIM_WEIGHT_TAGS
+        self.target_count         = self.DEFAULT_TARGET_COUNT
+        self.cutline_buffer_tiers = self.DEFAULT_CUTLINE_BUFFER_TIERS
+        self.zone_base_votes      = self.DEFAULT_ZONE_BASE_VOTES
+        self.zone_votes_per_tier  = self.DEFAULT_ZONE_VOTES_PER_TIER
     
     def validate_setting(self, setting_name: str, value: Any) -> bool:
         """
@@ -68,7 +80,8 @@ class AlgorithmSettings:
         min_val, max_val = self.VALID_RANGES[setting_name]
         
         # Check type
-        if setting_name in ['min_overflow_images', 'min_votes_for_stability']:
+        if setting_name in ['min_overflow_images', 'min_votes_for_stability',
+                             'target_count', 'cutline_buffer_tiers', 'zone_base_votes']:
             if not isinstance(value, int):
                 return False
         else:
@@ -123,7 +136,11 @@ class AlgorithmSettings:
                 'sim_weight_visual': self.sim_weight_visual,
                 'sim_weight_text':   self.sim_weight_text,
                 'sim_weight_tags':   self.sim_weight_tags,
-                'algorithm_version': '2.5'
+                'target_count':         self.target_count,
+                'cutline_buffer_tiers': self.cutline_buffer_tiers,
+                'zone_base_votes':      self.zone_base_votes,
+                'zone_votes_per_tier':  self.zone_votes_per_tier,
+                'algorithm_version': '2.6'
             }
         }
     
@@ -155,6 +172,14 @@ class AlgorithmSettings:
                           settings.get('sim_weight_text', self.DEFAULT_SIM_WEIGHT_TEXT))
             self.set_value('sim_weight_tags',
                           settings.get('sim_weight_tags', self.DEFAULT_SIM_WEIGHT_TAGS))
+            self.set_value('target_count',
+                          settings.get('target_count', self.DEFAULT_TARGET_COUNT))
+            self.set_value('cutline_buffer_tiers',
+                          settings.get('cutline_buffer_tiers', self.DEFAULT_CUTLINE_BUFFER_TIERS))
+            self.set_value('zone_base_votes',
+                          settings.get('zone_base_votes', self.DEFAULT_ZONE_BASE_VOTES))
+            self.set_value('zone_votes_per_tier',
+                          settings.get('zone_votes_per_tier', self.DEFAULT_ZONE_VOTES_PER_TIER))
             
             print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.2')}")
         else:
@@ -229,6 +254,30 @@ class AlgorithmSettings:
                 'default': self.DEFAULT_SIM_WEIGHT_TAGS,
                 'range': self.VALID_RANGES['sim_weight_tags'],
                 'description': 'Weight of structured tag overlap (artists/roles/styles) in hybrid score'
+            },
+            'target_count': {
+                'value': self.target_count,
+                'default': self.DEFAULT_TARGET_COUNT,
+                'range': self.VALID_RANGES['target_count'],
+                'description': 'Target number of images to keep. 0 = cutline system disabled'
+            },
+            'cutline_buffer_tiers': {
+                'value': self.cutline_buffer_tiers,
+                'default': self.DEFAULT_CUTLINE_BUFFER_TIERS,
+                'range': self.VALID_RANGES['cutline_buffer_tiers'],
+                'description': 'Tiers either side of cutline that form the boundary zone'
+            },
+            'zone_base_votes': {
+                'value': self.zone_base_votes,
+                'default': self.DEFAULT_ZONE_BASE_VOTES,
+                'range': self.VALID_RANGES['zone_base_votes'],
+                'description': 'Minimum votes required before any image can be confirmed in/out'
+            },
+            'zone_votes_per_tier': {
+                'value': self.zone_votes_per_tier,
+                'default': self.DEFAULT_ZONE_VOTES_PER_TIER,
+                'range': self.VALID_RANGES['zone_votes_per_tier'],
+                'description': 'Additional votes required per tier distance from cutline'
             }
         }
     
@@ -246,4 +295,8 @@ class AlgorithmSettings:
         new_settings.sim_weight_visual = self.sim_weight_visual
         new_settings.sim_weight_text   = self.sim_weight_text
         new_settings.sim_weight_tags   = self.sim_weight_tags
+        new_settings.target_count         = self.target_count
+        new_settings.cutline_buffer_tiers = self.cutline_buffer_tiers
+        new_settings.zone_base_votes      = self.zone_base_votes
+        new_settings.zone_votes_per_tier  = self.zone_votes_per_tier
         return new_settings

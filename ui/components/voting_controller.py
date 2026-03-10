@@ -254,25 +254,39 @@ class VotingController:
                 self.status_bar.config(text="Failed to bin image")
     
     def _update_stats_display(self):
-        """Update stats display with compatible method calls."""
-        if self.stats_label:
-            # Use compatible methods
-            if hasattr(self.data_manager, 'get_active_image_count'):
-                active_count = self.data_manager.get_active_image_count()
-                binned_count = self.data_manager.get_binned_image_count()
+        """Update stats display — shows zone progress when cutline is active."""
+        if not self.stats_label:
+            return
+        try:
+            active_count = self.data_manager.get_active_image_count()
+            binned_count = self.data_manager.get_binned_image_count()
+            votes        = self.data_manager.vote_count
+            target_count = self.data_manager.algorithm_settings.target_count
+
+            if target_count > 0:
+                # Cutline mode: show zone-based progress
+                summary = self.data_manager.get_progress_summary()
+                ct      = summary.get('cutline_tier')
+                ct_str  = f"Tier {ct}" if ct is not None else "—"
+                res     = summary.get('resolution_pct', 0.0)
+                self.stats_label.config(
+                    text=(
+                        f"Votes: {votes}  |  "
+                        f"✓ In: {summary['confirmed_in']}  "
+                        f"~ Boundary: {summary['boundary']}  "
+                        f"✗ Out: {summary['confirmed_out']}  "
+                        f"Binned: {summary['eliminated']}  |  "
+                        f"Cutline: {ct_str} (target {target_count})  |  "
+                        f"Resolution: {res:.0f}%"
+                    )
+                )
             else:
-                # Fallback calculation
-                total_images = len(self.data_manager.image_stats)
-                if hasattr(self.data_manager, 'binned_images'):
-                    binned_count = len(self.data_manager.binned_images)
-                    active_count = total_images - binned_count
-                else:
-                    active_count = total_images
-                    binned_count = 0
-            
-            self.stats_label.config(
-                text=f"Votes: {self.data_manager.vote_count} | Active: {active_count} | Binned: {binned_count}"
-            )
+                # Disabled: existing display
+                self.stats_label.config(
+                    text=f"Votes: {votes} | Active: {active_count} | Binned: {binned_count}"
+                )
+        except Exception as e:
+            print(f"VotingController: Error updating stats display: {e}")
     
     def show_next_pair(self) -> None:
         """Display the next pair of images for voting."""

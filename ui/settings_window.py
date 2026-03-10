@@ -30,6 +30,13 @@ class SettingsWindow:
         self._sim_status_label = None
         self._sim_build_btn = None
         self._sim_update_btn = None
+
+        # Target count / cutline UI state
+        self._target_count_var        = None
+        self._cutline_buffer_var      = None
+        self._zone_base_votes_var     = None
+        self._zone_votes_per_tier_var = None
+        self._cutline_preview_label   = None
     
     def show(self):
         """Show the settings window."""
@@ -100,6 +107,7 @@ tiers to grow naturally based on the collection's quality distribution."""
         # Settings sections
         self.create_tier_distribution_section(parent)
         self.create_overflow_detection_section(parent)
+        self.create_target_count_section(parent)
         self.create_similarity_section(parent)
         self.create_status_section(parent)
         
@@ -379,6 +387,7 @@ Tier Analysis:"""
         self.update_tier_std_display()
         self.update_overflow_threshold_display()
         self.update_min_overflow_images_display()
+        self.update_cutline_preview_display()
         self.update_similarity_status_display()
         self.update_status_display()
     
@@ -391,8 +400,24 @@ Tier Analysis:"""
             self.data_manager.algorithm_settings.overflow_threshold = self.overflow_threshold_var.get()
         if self.min_overflow_images_var is not None:
             self.data_manager.algorithm_settings.min_overflow_images = self.min_overflow_images_var.get()
-        
-        messagebox.showinfo("Success", f"Settings updated successfully!\n\nChanges will take effect immediately and will be saved when you save your progress.")
+
+        # Apply cutline settings
+        if self._target_count_var is not None:
+            self.data_manager.algorithm_settings.set_value(
+                'target_count', int(self._target_count_var.get()))
+        if self._cutline_buffer_var is not None:
+            self.data_manager.algorithm_settings.set_value(
+                'cutline_buffer_tiers', int(self._cutline_buffer_var.get()))
+        if self._zone_base_votes_var is not None:
+            self.data_manager.algorithm_settings.set_value(
+                'zone_base_votes', int(self._zone_base_votes_var.get()))
+        if self._zone_votes_per_tier_var is not None:
+            self.data_manager.algorithm_settings.set_value(
+                'zone_votes_per_tier', round(float(self._zone_votes_per_tier_var.get()), 2))
+
+        messagebox.showinfo("Success",
+            "Settings updated successfully!\n\n"
+            "Changes will take effect immediately and will be saved when you save your progress.")
         self.close_window()
     
     def create_similarity_section(self, parent: tk.Frame):
@@ -561,6 +586,151 @@ Tier Analysis:"""
         prompt_lookup = self._get_prompt_lookup()
         self._sim_build_thread = self.data_manager.similarity_manager.update_index_async(
             folder, image_names, prompt_lookup, progress, completion)
+
+    def create_target_count_section(self, parent: tk.Frame):
+        """Create the Target Count / Cutline system settings section."""
+        section = tk.Frame(parent, bg=Colors.BG_SECONDARY, relief=tk.RAISED, borderwidth=1)
+        section.pack(fill=tk.X, padx=10, pady=5)
+
+        tk.Label(section, text="Target Count & Cutline System",
+                 font=('Arial', 14, 'bold'), fg=Colors.TEXT_PRIMARY,
+                 bg=Colors.BG_SECONDARY).pack(pady=10)
+
+        desc = ("Set a target number of images to keep (e.g. 200). "
+                "The algorithm will then focus comparisons on images near the cutline — "
+                "those that could go either way. Images clearly above or below the cutline "
+                "with sufficient votes are excluded from further pairing. "
+                "Set to 0 to disable (existing sorting behaviour).")
+        tk.Label(section, text=desc, font=('Arial', 10, 'italic'),
+                 fg=Colors.TEXT_SECONDARY, bg=Colors.BG_SECONDARY,
+                 wraplength=850, justify=tk.LEFT).pack(padx=10, pady=5)
+
+        s = self.data_manager.algorithm_settings
+
+        # --- Target count ---
+        row1 = tk.Frame(section, bg=Colors.BG_SECONDARY)
+        row1.pack(fill=tk.X, padx=20, pady=4)
+        tk.Label(row1, text="Target Count (0 = disabled):",
+                 font=('Arial', 11), fg=Colors.TEXT_PRIMARY,
+                 bg=Colors.BG_SECONDARY, width=30, anchor='w').pack(side=tk.LEFT)
+        self._target_count_var = tk.IntVar(value=s.target_count)
+        tc_entry = tk.Spinbox(row1, from_=0, to=100000, increment=10,
+                              textvariable=self._target_count_var, width=10,
+                              command=self.update_cutline_preview_display)
+        tc_entry.pack(side=tk.LEFT, padx=5)
+        tc_entry.bind('<FocusOut>', lambda e: self.update_cutline_preview_display())
+        tc_entry.bind('<Return>',   lambda e: self.update_cutline_preview_display())
+
+        # --- Buffer tiers ---
+        row2 = tk.Frame(section, bg=Colors.BG_SECONDARY)
+        row2.pack(fill=tk.X, padx=20, pady=4)
+        tk.Label(row2, text="Boundary Buffer (tiers):",
+                 font=('Arial', 11), fg=Colors.TEXT_PRIMARY,
+                 bg=Colors.BG_SECONDARY, width=30, anchor='w').pack(side=tk.LEFT)
+        self._cutline_buffer_var = tk.IntVar(value=s.cutline_buffer_tiers)
+        tk.Spinbox(row2, from_=1, to=10, textvariable=self._cutline_buffer_var,
+                   width=6, command=self.update_cutline_preview_display).pack(side=tk.LEFT, padx=5)
+        tk.Label(row2, text="tiers either side of cutline form the boundary zone",
+                 font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY,
+                 bg=Colors.BG_SECONDARY).pack(side=tk.LEFT, padx=5)
+
+        # --- Zone base votes ---
+        row3 = tk.Frame(section, bg=Colors.BG_SECONDARY)
+        row3.pack(fill=tk.X, padx=20, pady=4)
+        tk.Label(row3, text="Zone Base Votes:",
+                 font=('Arial', 11), fg=Colors.TEXT_PRIMARY,
+                 bg=Colors.BG_SECONDARY, width=30, anchor='w').pack(side=tk.LEFT)
+        self._zone_base_votes_var = tk.IntVar(value=s.zone_base_votes)
+        tk.Spinbox(row3, from_=1, to=50, textvariable=self._zone_base_votes_var,
+                   width=6, command=self.update_cutline_preview_display).pack(side=tk.LEFT, padx=5)
+        tk.Label(row3, text="minimum votes before an image can be confirmed in/out",
+                 font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY,
+                 bg=Colors.BG_SECONDARY).pack(side=tk.LEFT, padx=5)
+
+        # --- Votes per tier ---
+        row4 = tk.Frame(section, bg=Colors.BG_SECONDARY)
+        row4.pack(fill=tk.X, padx=20, pady=4)
+        tk.Label(row4, text="Extra Votes per Tier Distance:",
+                 font=('Arial', 11), fg=Colors.TEXT_PRIMARY,
+                 bg=Colors.BG_SECONDARY, width=30, anchor='w').pack(side=tk.LEFT)
+        self._zone_votes_per_tier_var = tk.DoubleVar(value=s.zone_votes_per_tier)
+        tk.Scale(row4, from_=0.0, to=5.0, resolution=0.1, orient=tk.HORIZONTAL,
+                 variable=self._zone_votes_per_tier_var, length=200,
+                 command=lambda v: self.update_cutline_preview_display(),
+                 bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY,
+                 troughcolor=Colors.BG_TERTIARY).pack(side=tk.LEFT, padx=5)
+
+        # --- Live preview label ---
+        self._cutline_preview_label = tk.Label(
+            section, text="", font=('Arial', 10),
+            fg=Colors.TEXT_PRIMARY, bg=Colors.BG_SECONDARY,
+            justify=tk.LEFT, wraplength=850)
+        self._cutline_preview_label.pack(padx=20, pady=8, anchor='w')
+
+        self.update_cutline_preview_display()
+
+    def update_cutline_preview_display(self):
+        """Refresh the live cutline preview label."""
+        if self._cutline_preview_label is None:
+            return
+        try:
+            tc = int(self._target_count_var.get()) if self._target_count_var else 0
+        except (ValueError, tk.TclError):
+            tc = 0
+
+        if tc == 0:
+            self._cutline_preview_label.config(
+                text="Target count is 0 — cutline system disabled. Existing sorting behaviour active.",
+                fg=Colors.TEXT_SECONDARY)
+            return
+
+        # Build a temporary snapshot using current live vars
+        try:
+            buf   = int(self._cutline_buffer_var.get())   if self._cutline_buffer_var   else 2
+            bv    = int(self._zone_base_votes_var.get())  if self._zone_base_votes_var  else 5
+            vpt   = float(self._zone_votes_per_tier_var.get()) if self._zone_votes_per_tier_var else 0.5
+        except (ValueError, tk.TclError):
+            buf, bv, vpt = 2, 5, 0.5
+
+        active = self.data_manager.get_active_images()
+        n = len(active)
+        if n < tc:
+            self._cutline_preview_label.config(
+                text=f"Only {n} active images — need at least {tc} to establish a cutline.",
+                fg=Colors.TEXT_WARNING)
+            return
+
+        sorted_imgs = sorted(
+            active,
+            key=lambda img: self.data_manager.image_stats[img].get('current_tier', 0),
+            reverse=True)
+        cutline = self.data_manager.image_stats[sorted_imgs[tc - 1]].get('current_tier', 0)
+
+        # Count zones using live parameter values
+        confirmed_in = confirmed_out = boundary = 0
+        for img in active:
+            tier  = self.data_manager.image_stats[img].get('current_tier', 0)
+            votes = self.data_manager.image_stats[img].get('votes', 0)
+            dist  = abs(tier - cutline)
+            min_v = max(1, bv + round(dist * vpt))
+            if tier >= cutline + buf and votes >= min_v:
+                confirmed_in += 1
+            elif tier <= cutline - buf and votes >= min_v:
+                confirmed_out += 1
+            else:
+                boundary += 1
+
+        binned = self.data_manager.get_binned_image_count()
+        resolved = confirmed_in + confirmed_out + binned
+        total    = n + binned
+        res_pct  = resolved / total * 100 if total > 0 else 0.0
+
+        self._cutline_preview_label.config(
+            text=(f"With {n} active images and target {tc}:\n"
+                  f"  Cutline tier: {cutline}  |  "
+                  f"✓ In: {confirmed_in}  ~  Boundary: {boundary}  ✗ Out: {confirmed_out}  "
+                  f"Binned: {binned}  |  Resolution: {res_pct:.0f}%"),
+            fg=Colors.TEXT_SUCCESS if tc <= n else Colors.TEXT_WARNING)
 
     def close_window(self):
         """Handle window closing."""
