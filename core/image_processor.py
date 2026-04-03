@@ -63,7 +63,8 @@ class ImageProcessor:
                 # Skip hidden directories and optionally the Bin folder
                 dirs[:] = [d for d in dirs if not d.startswith('.')]
                 if exclude_bin_folder:
-                    dirs[:] = [d for d in dirs if d.lower() != 'bin']
+                    dirs[:] = [d for d in dirs
+                               if d.lower() not in ('bin', 'exports')]
                 
                 batch_size = 1000
                 for i in range(0, len(files), batch_size):

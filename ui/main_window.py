@@ -12,6 +12,8 @@ from core.image_processor import ImageProcessor
 from core.ranking_algorithm import RankingAlgorithm
 from core.prompt_analyzer import PromptAnalyzer
 from core.filter_manager import FilterManager
+from core.image_exporter import ImageExporter
+from ui.components.export_preview_window import ExportPreviewWindow
 
 from ui.components.image_display import ImageDisplayController
 from ui.components.voting_controller import VotingController
@@ -86,6 +88,7 @@ class MainWindow:
                 'save_data': self.save_data,
                 'load_data': self.load_data,
                 'purge_binned_votes': self.purge_binned_votes,
+                'export_top_images': self.export_top_images,
                 'show_stats': self.show_detailed_stats,
                 'show_prompt_analysis': self.show_prompt_analysis,
                 'show_settings': self.show_settings
@@ -379,6 +382,179 @@ class MainWindow:
             print(f"MainWindow: Error purging binned votes: {e}")
             messagebox.showerror("Purge Error", f"Failed to purge binned votes:\n{str(e)}")
     
+    def export_top_images(self) -> None:
+        """Open the Export Preview window to review and export top-N images."""
+        try:
+            if not self.data_manager.image_stats:
+                messagebox.showinfo("No Data", "No data loaded. Please load images first.")
+                return
+
+            active_count = self.data_manager.get_active_image_count()
+            if active_count == 0:
+                messagebox.showinfo("No Active Images", "There are no active images to export.")
+                return
+
+            if not self.data_manager.image_folder or \
+                    not os.path.isdir(self.data_manager.image_folder):
+                messagebox.showerror("No Folder",
+                                     "Image folder is not set or does not exist.\n"
+                                     "Load a folder first.")
+                return
+
+            # ── Step 1: ask for N ──────────────────────────────────────────
+            dialog = tk.Toplevel(self.root)
+            dialog.title("Export Top N Images")
+            dialog.geometry("360x160")
+            dialog.configure(bg=Colors.BG_PRIMARY)
+            dialog.grab_set()
+            dialog.resizable(False, False)
+
+            tk.Label(dialog, text=f"Active images: {active_count}",
+                     bg=Colors.BG_PRIMARY, fg=Colors.TEXT_SECONDARY).pack(pady=(16, 2))
+            tk.Label(dialog, text="Number of top images to preview for export:",
+                     bg=Colors.BG_PRIMARY, fg=Colors.TEXT_PRIMARY).pack(pady=(0, 6))
+
+            n_var = tk.StringVar(value="50")
+            entry = tk.Entry(dialog, textvariable=n_var, width=10,
+                             bg=Colors.BG_TERTIARY, fg=Colors.TEXT_PRIMARY,
+                             insertbackground=Colors.TEXT_PRIMARY, justify='center')
+            entry.pack()
+            entry.focus()
+
+            n_holder = [None]
+
+            def on_n_confirm():
+                try:
+                    n = int(n_var.get().strip())
+                    if n <= 0:
+                        raise ValueError
+                    n_holder[0] = min(n, active_count)
+                    dialog.destroy()
+                except ValueError:
+                    messagebox.showerror("Invalid Input",
+                                         "Please enter a positive integer.",
+                                         parent=dialog)
+
+            def on_n_cancel():
+                dialog.destroy()
+
+            bf = tk.Frame(dialog, bg=Colors.BG_PRIMARY)
+            bf.pack(pady=12)
+            tk.Button(bf, text="Preview", command=on_n_confirm,
+                      bg=Colors.BUTTON_SECONDARY, fg='white',
+                      relief=tk.FLAT, width=10).pack(side=tk.LEFT, padx=6)
+            tk.Button(bf, text="Cancel", command=on_n_cancel,
+                      bg=Colors.BUTTON_NEUTRAL, fg='white',
+                      relief=tk.FLAT, width=10).pack(side=tk.LEFT, padx=6)
+
+            dialog.bind('<Return>', lambda e: on_n_confirm())
+            dialog.bind('<Escape>', lambda e: on_n_cancel())
+            self.root.wait_window(dialog)
+
+            n = n_holder[0]
+            if n is None:
+                return  # user cancelled
+
+            # ── Step 2: compute top-N candidates ──────────────────────────
+            active = self.data_manager.get_active_images()
+            sorted_active = sorted(
+                active,
+                key=lambda img: (
+                    self.data_manager.image_stats[img].get('current_tier', 0),
+                    self.data_manager.image_stats[img].get('wins', 0)
+                ),
+                reverse=True
+            )
+            candidates = sorted_active[:n]
+
+            # Build (name, tier, votes, wins) tuples for the preview window
+            image_list = []
+            for img in candidates:
+                s = self.data_manager.image_stats[img]
+                image_list.append((
+                    img,
+                    s.get('current_tier', 0),
+                    s.get('votes', 0),
+                    s.get('wins', 0),
+                ))
+
+            # ── Step 3: open preview window; export runs in the callback ──
+            def _do_export(selected_names: list):
+                """Called by ExportPreviewWindow after the user clicks Export."""
+                try:
+                    export_folder = os.path.join(
+                        self.data_manager.image_folder, 'Exports')
+                    confirm = messagebox.askyesno(
+                        "Confirm Export",
+                        f"Export {len(selected_names)} image(s) to:\n"
+                        f"{export_folder}\n\n"
+                        f"• Their votes will be removed from remaining images\n"
+                        f"• They will be fully removed from the ranking data\n\n"
+                        f"This cannot be undone. Continue?"
+                    )
+                    if not confirm:
+                        return
+
+                    print(f"MainWindow: Exporting {len(selected_names)} selected images…")
+
+                    exported = self.data_manager.export_specific_images(selected_names)
+                    if not exported:
+                        messagebox.showinfo("Nothing Exported", "No images were exported.")
+                        return
+
+                    exporter = ImageExporter(self.data_manager.image_folder)
+                    moved_ok, move_errors = 0, []
+                    for img_name in exported:
+                        ok, err = exporter.move_image_to_exports(img_name)
+                        if ok:
+                            moved_ok += 1
+                        else:
+                            move_errors.append(f"{img_name}: {err}")
+
+                    # Refresh UI
+                    ui_refs = self.ui_builder.get_ui_references()
+                    new_active = self.data_manager.get_active_image_count()
+                    new_binned = self.data_manager.get_binned_image_count()
+                    ui_refs['stats_label'].config(
+                        text=f"Votes: {self.data_manager.vote_count} "
+                             f"| Active: {new_active} | Binned: {new_binned}")
+                    if ui_refs.get('status_bar'):
+                        ui_refs['status_bar'].config(
+                            text=f"Exported {moved_ok} image(s). "
+                                 f"{new_active} active images remain.")
+
+                    if self.voting_controller:
+                        self.voting_controller.show_next_pair()
+
+                    summary = (f"Exported {moved_ok} of {len(exported)} image(s) to:\n"
+                               f"{exporter.export_folder}\n\n"
+                               f"Active images remaining: {new_active}\n\n"
+                               f"Save your progress to persist these changes.")
+                    if move_errors:
+                        summary += (f"\n\nFile move errors ({len(move_errors)}):\n"
+                                    + "\n".join(move_errors[:5]))
+                    messagebox.showinfo("Export Complete", summary)
+                    print(f"MainWindow: Export complete — {moved_ok}/{len(exported)} files moved.")
+
+                except Exception as e:
+                    print(f"MainWindow: Error in export callback: {e}")
+                    import traceback; traceback.print_exc()
+                    messagebox.showerror("Export Error",
+                                         f"Failed to export images:\n{str(e)}")
+
+            ExportPreviewWindow(
+                self.root,
+                self.data_manager.image_folder,
+                image_list,
+                on_confirm=_do_export,
+            )
+
+        except Exception as e:
+            print(f"MainWindow: Error opening export preview: {e}")
+            import traceback; traceback.print_exc()
+            messagebox.showerror("Export Error",
+                                 f"Failed to open export preview:\n{str(e)}")
+
     def load_data(self) -> None:
         """Load ranking data from file with error handling."""
         try:
@@ -525,6 +701,10 @@ class MainWindow:
 
         def completion(success, message):
             print(f"[SimilarityManager] Auto-build complete: {message}")
+            if success:
+                # Invalidate the CLIP filter index so it is rebuilt from the
+                # freshly populated prompt_tags on next filter panel access.
+                self.filter_manager.invalidate_clip_index()
             if status_bar:
                 final = (f"✅ Similarity index built ({len(sm.filenames)} embeddings). "
                          f"Visual similarity pairing is now active."
@@ -556,6 +736,10 @@ class MainWindow:
 
         def completion(success, message):
             print(f"[SimilarityManager] Auto-update complete: {message}")
+            if success:
+                # Invalidate the CLIP filter index so new tags are picked up
+                # on next filter panel access.
+                self.filter_manager.invalidate_clip_index()
             if status_bar:
                 final = (f"✅ Similarity index updated ({len(sm.filenames)} embeddings total). "
                          f"Visual similarity pairing is now active."

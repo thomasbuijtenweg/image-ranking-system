@@ -22,6 +22,8 @@ class AlgorithmSettings:
     DEFAULT_CUTLINE_BUFFER_TIERS  = 2      # tiers either side of cutline = boundary zone
     DEFAULT_ZONE_BASE_VOTES       = 5      # min votes before any image can be confirmed
     DEFAULT_ZONE_VOTES_PER_TIER   = 0.5    # extra votes required per tier from cutline
+    # Fix A: hard minimum vote gate — no image can be confirmed_out until it reaches this count
+    DEFAULT_MIN_VOTES_BEFORE_CUT  = 8
     
     # Valid ranges for settings
     VALID_RANGES = {
@@ -40,6 +42,7 @@ class AlgorithmSettings:
         'cutline_buffer_tiers': (1, 10),
         'zone_base_votes':      (1, 50),
         'zone_votes_per_tier':  (0.0, 5.0),
+        'min_votes_before_cut': (1, 50),
     }
     
     def __init__(self):
@@ -62,18 +65,9 @@ class AlgorithmSettings:
         self.cutline_buffer_tiers = self.DEFAULT_CUTLINE_BUFFER_TIERS
         self.zone_base_votes      = self.DEFAULT_ZONE_BASE_VOTES
         self.zone_votes_per_tier  = self.DEFAULT_ZONE_VOTES_PER_TIER
-    
+        self.min_votes_before_cut = self.DEFAULT_MIN_VOTES_BEFORE_CUT
+
     def validate_setting(self, setting_name: str, value: Any) -> bool:
-        """
-        Validate a setting value.
-        
-        Args:
-            setting_name: Name of the setting
-            value: Value to validate
-            
-        Returns:
-            True if valid, False otherwise
-        """
         if setting_name not in self.VALID_RANGES:
             return False
         
@@ -81,7 +75,8 @@ class AlgorithmSettings:
         
         # Check type
         if setting_name in ['min_overflow_images', 'min_votes_for_stability',
-                             'target_count', 'cutline_buffer_tiers', 'zone_base_votes']:
+                             'target_count', 'cutline_buffer_tiers', 'zone_base_votes',
+                             'min_votes_before_cut']:
             if not isinstance(value, int):
                 return False
         else:
@@ -92,33 +87,13 @@ class AlgorithmSettings:
         return min_val <= value <= max_val
     
     def set_value(self, setting_name: str, value: Any) -> bool:
-        """
-        Set a setting value with validation.
-        
-        Args:
-            setting_name: Name of the setting
-            value: Value to set
-            
-        Returns:
-            True if set successfully, False if invalid
-        """
         if not self.validate_setting(setting_name, value):
             print(f"Invalid value for {setting_name}: {value}")
             return False
-        
         setattr(self, setting_name, value)
         return True
     
     def get_value(self, setting_name: str) -> Any:
-        """
-        Get a setting value.
-        
-        Args:
-            setting_name: Name of the setting
-            
-        Returns:
-            Setting value or None if not found
-        """
         return getattr(self, setting_name, None)
     
     def export_settings(self) -> Dict[str, Any]:
@@ -140,27 +115,26 @@ class AlgorithmSettings:
                 'cutline_buffer_tiers': self.cutline_buffer_tiers,
                 'zone_base_votes':      self.zone_base_votes,
                 'zone_votes_per_tier':  self.zone_votes_per_tier,
-                'algorithm_version': '2.6'
+                'min_votes_before_cut': self.min_votes_before_cut,
+                'algorithm_version': '2.7'
             }
         }
-    
+
     def load_settings(self, data: Dict[str, Any]) -> None:
         """Load settings from saved data."""
         if 'algorithm_settings' in data:
             settings = data['algorithm_settings']
-            
-            # Load each setting with validation
-            self.set_value('tier_distribution_std', 
+            self.set_value('tier_distribution_std',
                           settings.get('tier_distribution_std', self.DEFAULT_TIER_DISTRIBUTION_STD))
-            self.set_value('confidence_vote_scale', 
+            self.set_value('confidence_vote_scale',
                           settings.get('confidence_vote_scale', self.DEFAULT_CONFIDENCE_VOTE_SCALE))
-            self.set_value('confidence_balance', 
+            self.set_value('confidence_balance',
                           settings.get('confidence_balance', self.DEFAULT_CONFIDENCE_BALANCE))
-            self.set_value('overflow_threshold', 
+            self.set_value('overflow_threshold',
                           settings.get('overflow_threshold', self.DEFAULT_OVERFLOW_THRESHOLD))
-            self.set_value('min_overflow_images', 
+            self.set_value('min_overflow_images',
                           settings.get('min_overflow_images', self.DEFAULT_MIN_OVERFLOW_IMAGES))
-            self.set_value('min_votes_for_stability', 
+            self.set_value('min_votes_for_stability',
                           settings.get('min_votes_for_stability', self.DEFAULT_MIN_VOTES_FOR_STABILITY))
             self.set_value('max_votes_multiplier',
                           settings.get('max_votes_multiplier', self.DEFAULT_MAX_VOTES_MULTIPLIER))
@@ -180,12 +154,12 @@ class AlgorithmSettings:
                           settings.get('zone_base_votes', self.DEFAULT_ZONE_BASE_VOTES))
             self.set_value('zone_votes_per_tier',
                           settings.get('zone_votes_per_tier', self.DEFAULT_ZONE_VOTES_PER_TIER))
-            
+            self.set_value('min_votes_before_cut',
+                          settings.get('min_votes_before_cut', self.DEFAULT_MIN_VOTES_BEFORE_CUT))
             print(f"Loaded algorithm settings v{settings.get('algorithm_version', '2.2')}")
         else:
-            # Set defaults if no settings found
             self.reset_to_defaults()
-    
+
     def get_settings_info(self) -> Dict[str, Any]:
         """Get information about current settings."""
         return {
@@ -241,7 +215,7 @@ class AlgorithmSettings:
                 'value': self.sim_weight_visual,
                 'default': self.DEFAULT_SIM_WEIGHT_VISUAL,
                 'range': self.VALID_RANGES['sim_weight_visual'],
-                'description': 'Weight of CLIP visual similarity in hybrid score (should sum to 1 with text+tags)'
+                'description': 'Weight of CLIP visual similarity in hybrid score'
             },
             'sim_weight_text': {
                 'value': self.sim_weight_text,
@@ -253,7 +227,7 @@ class AlgorithmSettings:
                 'value': self.sim_weight_tags,
                 'default': self.DEFAULT_SIM_WEIGHT_TAGS,
                 'range': self.VALID_RANGES['sim_weight_tags'],
-                'description': 'Weight of structured tag overlap (artists/roles/styles) in hybrid score'
+                'description': 'Weight of structured tag overlap in hybrid score'
             },
             'target_count': {
                 'value': self.target_count,
@@ -278,7 +252,15 @@ class AlgorithmSettings:
                 'default': self.DEFAULT_ZONE_VOTES_PER_TIER,
                 'range': self.VALID_RANGES['zone_votes_per_tier'],
                 'description': 'Additional votes required per tier distance from cutline'
-            }
+            },
+            'min_votes_before_cut': {
+                'value': self.min_votes_before_cut,
+                'default': self.DEFAULT_MIN_VOTES_BEFORE_CUT,
+                'range': self.VALID_RANGES['min_votes_before_cut'],
+                'description': 'Hard minimum votes before an image can be confirmed_out. '
+                               'Also governs Fix B: a graduated extra tier buffer is applied '
+                               'for images between this threshold and 2x it.'
+            },
         }
     
     def clone(self) -> 'AlgorithmSettings':
@@ -299,4 +281,5 @@ class AlgorithmSettings:
         new_settings.cutline_buffer_tiers = self.cutline_buffer_tiers
         new_settings.zone_base_votes      = self.zone_base_votes
         new_settings.zone_votes_per_tier  = self.zone_votes_per_tier
+        new_settings.min_votes_before_cut = self.min_votes_before_cut
         return new_settings

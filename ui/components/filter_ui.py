@@ -12,23 +12,31 @@ class FilterUI:
         self.parent = parent
         self.filter_manager = filter_manager
         self.on_filter_change = on_filter_change
-        
+
         self.filter_frame = None
-        self.content_frame = None  # Collapsible content
-        self.is_expanded = False  # Start collapsed
+        self.content_frame = None
+        self.is_expanded = False
         self.toggle_button = None
-        
+
         self.search_var = tk.StringVar()
         self.search_var.trace('w', self._on_search_change)
-        
+
+        # Source selector: 'prompt' or 'clip'
+        self.source_var = tk.StringVar(value='prompt')
+        # CLIP bucket selector
+        self.clip_bucket_var = tk.StringVar(value='all')
+
         # UI elements
         self.search_listbox = None
         self.include_listbox = None
         self.exclude_listbox = None
         self.logic_var = tk.StringVar(value='AND')
         self.stats_label = None
-        self.header_stats_label = None  # Stats visible when collapsed
-        
+        self.header_stats_label = None
+
+        # Bucket radio-button row (shown only in CLIP mode)
+        self._bucket_frame = None
+
         self._create_ui()
     
     def _create_ui(self) -> None:
@@ -43,8 +51,8 @@ class FilterUI:
         
         # Toggle button
         self.toggle_button = tk.Button(
-            header_frame, 
-            text="▶ Prompt Filters",
+            header_frame,
+            text="▶ Prompt & CLIP Filters",
             command=self._toggle_expand,
             bg='#3a3a3a',
             fg='white',
@@ -77,20 +85,42 @@ class FilterUI:
     
     def _create_filter_content(self) -> None:
         """Create the actual filter controls (inside content_frame)."""
-        
-        # Search section
+
+        # ── Source toggle ─────────────────────────────────────────────────
+        source_row = ttk.Frame(self.content_frame)
+        source_row.pack(fill=tk.X, padx=10, pady=(10, 2))
+        ttk.Label(source_row, text="Word source:").pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Radiobutton(source_row, text="Prompt Text",
+                        variable=self.source_var, value='prompt',
+                        command=self._on_source_change).pack(side=tk.LEFT, padx=(0, 6))
+        ttk.Radiobutton(source_row, text="CLIP Tags",
+                        variable=self.source_var, value='clip',
+                        command=self._on_source_change).pack(side=tk.LEFT)
+
+        # ── CLIP bucket selector (hidden until CLIP source is chosen) ─────
+        self._bucket_frame = ttk.Frame(self.content_frame)
+        # (not packed yet — shown by _on_source_change when clip is selected)
+        ttk.Label(self._bucket_frame, text="Bucket:").pack(side=tk.LEFT, padx=(0, 6))
+        for label, val in [("All", "all"), ("Artists", "artists"),
+                           ("Roles", "roles"), ("Styles", "styles"),
+                           ("Settings", "settings")]:
+            ttk.Radiobutton(self._bucket_frame, text=label,
+                            variable=self.clip_bucket_var, value=val,
+                            command=self._refresh_search_results).pack(
+                side=tk.LEFT, padx=(0, 4))
+
+        # ── Search box ────────────────────────────────────────────────────
         search_frame = ttk.Frame(self.content_frame)
-        search_frame.pack(fill=tk.X, pady=(10, 10), padx=10)
-        
-        ttk.Label(search_frame, text="Search words:").pack(side=tk.LEFT, padx=(0, 5))
-        search_entry = ttk.Entry(search_frame, textvariable=self.search_var, width=30)
-        search_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        
-        # Search results
-        search_results_frame = ttk.LabelFrame(self.content_frame, text="Available Words (click to add)", padding=5)
+        search_frame.pack(fill=tk.X, pady=(6, 6), padx=10)
+        ttk.Label(search_frame, text="Search:").pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Entry(search_frame, textvariable=self.search_var,
+                  width=30).pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        # ── Available words list ──────────────────────────────────────────
+        search_results_frame = ttk.LabelFrame(
+            self.content_frame, text="Available Words (click to add)", padding=5)
         search_results_frame.pack(fill=tk.BOTH, expand=True, pady=(0, 10), padx=10)
-        
-        # Scrollable listbox with word frequencies
+
         search_scroll = ttk.Scrollbar(search_results_frame, orient=tk.VERTICAL)
         self.search_listbox = tk.Listbox(
             search_results_frame,
@@ -102,99 +132,95 @@ class FilterUI:
         search_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.search_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.search_listbox.bind('<Double-Button-1>', self._on_word_double_click)
-        
-        # Add buttons frame
+
+        # ── Add buttons ───────────────────────────────────────────────────
         add_buttons_frame = ttk.Frame(self.content_frame)
         add_buttons_frame.pack(fill=tk.X, pady=(0, 10), padx=10)
-        
-        ttk.Button(add_buttons_frame, text="Add to Include", 
-                  command=self._add_to_include).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(add_buttons_frame, text="Add to Exclude", 
-                  command=self._add_to_exclude).pack(side=tk.LEFT)
-        
-        # Active filters section
+        ttk.Button(add_buttons_frame, text="Add to Include",
+                   command=self._add_to_include).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(add_buttons_frame, text="Add to Exclude",
+                   command=self._add_to_exclude).pack(side=tk.LEFT)
+
+        # ── Active filter lists ───────────────────────────────────────────
         filters_container = ttk.Frame(self.content_frame)
         filters_container.pack(fill=tk.BOTH, expand=True, padx=10)
-        
-        # Include filters
+
         include_frame = ttk.LabelFrame(filters_container, text="Include (must have)", padding=5)
         include_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
-        
         include_scroll = ttk.Scrollbar(include_frame, orient=tk.VERTICAL)
         self.include_listbox = tk.Listbox(
-            include_frame,
-            yscrollcommand=include_scroll.set,
-            height=6,
-            selectmode=tk.SINGLE
-        )
+            include_frame, yscrollcommand=include_scroll.set,
+            height=6, selectmode=tk.SINGLE)
         include_scroll.config(command=self.include_listbox.yview)
         include_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.include_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.include_listbox.bind('<Double-Button-1>', self._on_include_double_click)
-        
-        # Exclude filters
-        exclude_frame = ttk.LabelFrame(filters_container, text="Exclude (must NOT have)", padding=5)
+
+        exclude_frame = ttk.LabelFrame(
+            filters_container, text="Exclude (must NOT have)", padding=5)
         exclude_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        
         exclude_scroll = ttk.Scrollbar(exclude_frame, orient=tk.VERTICAL)
         self.exclude_listbox = tk.Listbox(
-            exclude_frame,
-            yscrollcommand=exclude_scroll.set,
-            height=6,
-            selectmode=tk.SINGLE
-        )
+            exclude_frame, yscrollcommand=exclude_scroll.set,
+            height=6, selectmode=tk.SINGLE)
         exclude_scroll.config(command=self.exclude_listbox.yview)
         exclude_scroll.pack(side=tk.RIGHT, fill=tk.Y)
         self.exclude_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.exclude_listbox.bind('<Double-Button-1>', self._on_exclude_double_click)
-        
-        # Control buttons
+
+        # ── Controls ──────────────────────────────────────────────────────
         control_frame = ttk.Frame(self.content_frame)
         control_frame.pack(fill=tk.X, pady=(10, 0), padx=10)
-        
-        # Logic toggle
+
         logic_frame = ttk.Frame(control_frame)
         logic_frame.pack(side=tk.LEFT)
-        
         ttk.Label(logic_frame, text="Include Logic:").pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Radiobutton(logic_frame, text="AND (all words)", 
-                       variable=self.logic_var, value='AND',
-                       command=self._on_logic_change).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Radiobutton(logic_frame, text="OR (any word)", 
-                       variable=self.logic_var, value='OR',
-                       command=self._on_logic_change).pack(side=tk.LEFT)
-        
-        # Clear and Apply buttons
+        ttk.Radiobutton(logic_frame, text="AND (all words)",
+                        variable=self.logic_var, value='AND',
+                        command=self._on_logic_change).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Radiobutton(logic_frame, text="OR (any word)",
+                        variable=self.logic_var, value='OR',
+                        command=self._on_logic_change).pack(side=tk.LEFT)
+
         button_frame = ttk.Frame(control_frame)
         button_frame.pack(side=tk.RIGHT)
-        
-        ttk.Button(button_frame, text="Clear All Filters", 
-                  command=self._clear_filters).pack(side=tk.LEFT, padx=(0, 5))
-        ttk.Button(button_frame, text="Apply Filters", 
-                  command=self._apply_filters).pack(side=tk.LEFT)
-        
-        # Stats display (inside expanded view)
+        ttk.Button(button_frame, text="Clear All Filters",
+                   command=self._clear_filters).pack(side=tk.LEFT, padx=(0, 5))
+        ttk.Button(button_frame, text="Apply Filters",
+                   command=self._apply_filters).pack(side=tk.LEFT)
+
         self.stats_label = ttk.Label(self.content_frame, text="", foreground="blue")
         self.stats_label.pack(pady=(10, 10), padx=10)
     
     def _toggle_expand(self) -> None:
         """Toggle the expanded/collapsed state of the filter panel."""
         self.is_expanded = not self.is_expanded
-        
+
         if self.is_expanded:
-            # Expand - show content
-            self.toggle_button.config(text="▼ Prompt Filters")
+            self.toggle_button.config(text="▼ Prompt & CLIP Filters")
             self.content_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=(0, 2))
-            # Populate content when first expanded
+            # Rebuild CLIP index now that panel is open (no-op if already built)
+            self.filter_manager.rebuild_clip_index_if_needed()
             self._refresh_search_results()
             self._refresh_filter_lists()
             self._update_stats()
         else:
-            # Collapse - hide content
-            self.toggle_button.config(text="▶ Prompt Filters")
+            self.toggle_button.config(text="▶ Prompt & CLIP Filters")
             self.content_frame.pack_forget()
-        
+
         self._update_header_stats()
+
+    def _on_source_change(self) -> None:
+        """Show/hide the CLIP bucket selector and refresh the word list."""
+        if self.source_var.get() == 'clip':
+            # Rebuild CLIP index on demand
+            self.filter_manager.rebuild_clip_index_if_needed()
+            if self._bucket_frame:
+                self._bucket_frame.pack(fill=tk.X, padx=10, pady=(0, 4))
+        else:
+            if self._bucket_frame:
+                self._bucket_frame.pack_forget()
+        self._refresh_search_results()
     
     def _update_header_stats(self) -> None:
         """Update the header stats label (visible when collapsed)."""
@@ -217,13 +243,38 @@ class FilterUI:
         self._refresh_search_results()
     
     def _refresh_search_results(self) -> None:
-        """Refresh the search results listbox."""
+        """Refresh the search results listbox based on current source and bucket."""
         pattern = self.search_var.get()
-        results = self.filter_manager.search_words(pattern, limit=100)
-        
+
+        if self.source_var.get() == 'clip':
+            bucket = self.clip_bucket_var.get()
+            results = self.filter_manager.search_clip_words(
+                pattern,
+                bucket=None if bucket == 'all' else bucket,
+                limit=100
+            )
+            # Prefix with bucket label when showing all buckets
+            if bucket == 'all':
+                # Build a label map for display
+                display_items = []
+                for term, freq in results:
+                    # Find which bucket this term is in (first match)
+                    bucket_label = ''
+                    for b in self.filter_manager.CLIP_BUCKETS:
+                        if term in self.filter_manager.clip_tag_index_by_bucket.get(b, {}):
+                            bucket_label = b[:3].upper()  # ART / ROL / STY / SET
+                            break
+                    display_items.append((term, freq, bucket_label))
+            else:
+                display_items = [(t, f, '') for t, f in results]
+        else:
+            results = self.filter_manager.search_words(pattern, limit=100)
+            display_items = [(t, f, '') for t, f in results]
+
         self.search_listbox.delete(0, tk.END)
-        for word, frequency in results:
-            self.search_listbox.insert(tk.END, f"{word} ({frequency})")
+        for term, freq, label in display_items:
+            prefix = f"[{label}] " if label else ""
+            self.search_listbox.insert(tk.END, f"{prefix}{term} ({freq})")
     
     def _refresh_filter_lists(self) -> None:
         """Refresh the include and exclude filter lists."""
@@ -259,15 +310,22 @@ class FilterUI:
         self._update_header_stats()
     
     def _get_selected_word_from_search(self) -> Optional[str]:
-        """Get the selected word from search results."""
+        """Get the selected word from search results.
+
+        Handles both plain 'word (freq)' format and CLIP prefixed
+        '[ART] word (freq)' format — extracts the bare term in both cases.
+        """
         selection = self.search_listbox.curselection()
         if not selection:
             return None
-        
+
         text = self.search_listbox.get(selection[0])
-        # Extract word from "word (frequency)" format
+        # Strip optional bucket prefix e.g. "[ART] "
+        if text.startswith('[') and '] ' in text:
+            text = text.split('] ', 1)[1]
+        # Strip trailing " (frequency)"
         word = text.split(' (')[0] if ' (' in text else text
-        return word
+        return word.strip()
     
     def _add_to_include(self) -> None:
         """Add selected word to include filters."""

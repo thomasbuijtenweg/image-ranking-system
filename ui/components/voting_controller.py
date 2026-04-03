@@ -23,7 +23,8 @@ class VotingController:
         self.next_pair = (None, None)
         self.previous_pair = (None, None)
         self.last_vote_result = None  # Track last vote for binning
-        self.bin_next_loser = False  # Flag to bin the loser of the next vote
+        # Bin mode: 0 = off, 1 = bin loser only, 2 = bin both images
+        self.bin_mode = 0
         
         self.left_vote_button = None
         self.right_vote_button = None
@@ -115,50 +116,57 @@ class VotingController:
             self.image_binner = None
     
     def prepare_to_bin_next_loser(self) -> None:
-        """
-        Set flag to bin the loser of the next vote.
-        Called by the down arrow key.
+        """Cycle bin mode: 0 (off) → 1 (bin loser) → 2 (bin both) → 0 (off).
+        
+        Press ↓ once : next vote bins the loser only.
+        Press ↓ twice: next vote bins BOTH images.
+        Press ↓ again: cancel, return to normal voting.
         """
         print("VotingController: prepare_to_bin_next_loser called")
-        
+
         if not self.current_pair[0] or not self.current_pair[1]:
             print("VotingController: No current pair available")
             if self.status_bar:
                 self.status_bar.config(text="No images available - load images first")
             return
-        
+
         if not self.image_binner:
             print("VotingController: ERROR - Image binner not initialized")
             if self.status_bar:
-                self.status_bar.config(text="Error: Image binner not initialized - select a folder first")
+                self.status_bar.config(
+                    text="Error: Image binner not initialized - select a folder first")
             return
-        
-        # Toggle bin mode
-        self.bin_next_loser = not self.bin_next_loser
-        print(f"VotingController: Bin mode toggled to: {self.bin_next_loser}")
-        
-        if self.bin_next_loser:
+
+        # Advance through the three states
+        self.bin_mode = (self.bin_mode + 1) % 3
+        print(f"VotingController: bin_mode → {self.bin_mode}")
+
+        if self.bin_mode == 1:
             if self.status_bar:
-                self.status_bar.config(text="🗑️ BIN MODE: Next loser will be binned to Bin folder - vote normally")
-            
-            # Update button text to show bin mode
+                self.status_bar.config(
+                    text="🗑️ BIN LOSER: Next loser will be binned — vote normally")
             if self.left_vote_button:
-                self.left_vote_button.config(text="Vote for this image (← + BIN)", bg=Colors.BUTTON_WARNING)
+                self.left_vote_button.config(
+                    text="Vote for this image (← + BIN LOSER)", bg=Colors.BUTTON_WARNING)
             if self.right_vote_button:
-                self.right_vote_button.config(text="Vote for this image (→ + BIN)", bg=Colors.BUTTON_WARNING)
-            
-            print("VotingController: Bin mode enabled - next loser will be binned")
-        else:
+                self.right_vote_button.config(
+                    text="Vote for this image (→ + BIN LOSER)", bg=Colors.BUTTON_WARNING)
+
+        elif self.bin_mode == 2:
             if self.status_bar:
-                self.status_bar.config(text="Bin mode cancelled - voting normally")
-            
-            # Reset button text and color
+                self.status_bar.config(
+                    text="🗑️🗑️ BIN BOTH: Next vote will bin BOTH images — vote to confirm")
             if self.left_vote_button:
-                self.left_vote_button.config(text="Vote for this image (←)", bg=Colors.BUTTON_SUCCESS)
+                self.left_vote_button.config(
+                    text="Vote (← + BIN BOTH)", bg=Colors.BUTTON_DANGER)
             if self.right_vote_button:
-                self.right_vote_button.config(text="Vote for this image (→)", bg=Colors.BUTTON_SUCCESS)
-            
-            print("VotingController: Bin mode disabled")
+                self.right_vote_button.config(
+                    text="Vote (→ + BIN BOTH)", bg=Colors.BUTTON_DANGER)
+
+        else:  # mode 0 — cancelled
+            if self.status_bar:
+                self.status_bar.config(text="Bin mode cancelled — voting normally")
+            self._reset_button_appearance()
     
     def bin_last_loser(self) -> None:
         """
@@ -328,18 +336,26 @@ class VotingController:
         self.left_vote_button.config(state=tk.NORMAL)
         self.right_vote_button.config(state=tk.NORMAL)
         
-        if self.bin_next_loser:
-            # Keep bin mode appearance
-            self.left_vote_button.config(text="Vote for this image (← + BIN)", bg=Colors.BUTTON_WARNING)
-            self.right_vote_button.config(text="Vote for this image (→ + BIN)", bg=Colors.BUTTON_WARNING)
-            print("VotingController: Buttons set to bin mode appearance")
+        if self.bin_mode == 1:
+            self.left_vote_button.config(
+                text="Vote for this image (← + BIN LOSER)", bg=Colors.BUTTON_WARNING)
+            self.right_vote_button.config(
+                text="Vote for this image (→ + BIN LOSER)", bg=Colors.BUTTON_WARNING)
+            print("VotingController: Buttons set to bin-loser mode appearance")
+        elif self.bin_mode == 2:
+            self.left_vote_button.config(
+                text="Vote (← + BIN BOTH)", bg=Colors.BUTTON_DANGER)
+            self.right_vote_button.config(
+                text="Vote (→ + BIN BOTH)", bg=Colors.BUTTON_DANGER)
+            print("VotingController: Buttons set to bin-both mode appearance")
         else:
-            # Normal appearance
-            self.left_vote_button.config(text="Vote for this image (←)", bg=Colors.BUTTON_SUCCESS)
-            self.right_vote_button.config(text="Vote for this image (→)", bg=Colors.BUTTON_SUCCESS)
-        
+            self.left_vote_button.config(
+                text="Vote for this image (←)", bg=Colors.BUTTON_SUCCESS)
+            self.right_vote_button.config(
+                text="Vote for this image (→)", bg=Colors.BUTTON_SUCCESS)
+
         explanation = self.ranking_algorithm.get_selection_explanation(img1, img2)
-        if self.status_bar and not self.bin_next_loser:  # Don't override bin mode message
+        if self.status_bar and self.bin_mode == 0:  # Don't override bin mode message
             self.status_bar.config(text=explanation)
         
         if self.preload_timer:
@@ -388,18 +404,19 @@ class VotingController:
         self.last_vote_result = (winner, loser)
         print(f"VotingController: Vote recorded and stored for potential binning")
         
-        # Handle binning if bin mode is enabled
-        if self.bin_next_loser:
-            print("VotingController: Bin mode is enabled, binning loser immediately")
+        # Handle binning based on current bin_mode
+        if self.bin_mode == 1:
+            print("VotingController: bin_mode=1, binning loser")
             self._bin_loser_immediately(winner, loser)
-            self.bin_next_loser = False  # Reset bin mode
-            
-            # Reset button appearance
-            if self.left_vote_button:
-                self.left_vote_button.config(text="Vote for this image (←)", bg=Colors.BUTTON_SUCCESS)
-            if self.right_vote_button:
-                self.right_vote_button.config(text="Vote for this image (→)", bg=Colors.BUTTON_SUCCESS)
+            self.bin_mode = 0
+            self._reset_button_appearance()
             print("VotingController: Bin mode reset after use")
+        elif self.bin_mode == 2:
+            print("VotingController: bin_mode=2, binning both images")
+            self._bin_both_immediately(winner, loser)
+            self.bin_mode = 0
+            self._reset_button_appearance()
+            print("VotingController: Bin-both mode reset after use")
         else:
             # Normal vote without binning
             self._update_stats_display()
@@ -484,6 +501,93 @@ class VotingController:
             if self.status_bar:
                 self.status_bar.config(text=f"Vote recorded but {loser} was already binned")
     
+    def _reset_button_appearance(self) -> None:
+        """Restore vote buttons to their normal (non-bin) appearance."""
+        if self.left_vote_button:
+            self.left_vote_button.config(
+                text="Vote for this image (←)", bg=Colors.BUTTON_SUCCESS)
+        if self.right_vote_button:
+            self.right_vote_button.config(
+                text="Vote for this image (→)", bg=Colors.BUTTON_SUCCESS)
+
+    def _bin_both_immediately(self, winner: str, loser: str) -> None:
+        """Bin both the winner and the loser after a vote (bin-both mode).
+
+        Uses an atomic pattern to avoid partial-purge inconsistencies:
+          1. Mark BOTH as binned first.
+          2. Purge each image's votes from remaining active images.
+             Because both are already binned, the cross-vote between them
+             is skipped by the purge loop — neither contaminates the other.
+             All other active images are cleaned correctly.
+          3. Move files. If a file move fails, only that image's bin mark is
+             reversed (the other image stays binned and its purge already ran).
+        """
+        print(f"VotingController: _bin_both_immediately: {winner} and {loser}")
+
+        if not self.image_binner:
+            if self.status_bar:
+                self.status_bar.config(text="Error: Image binner not initialized")
+            return
+
+        # Step 1 — Mark BOTH as binned atomically before any purge runs.
+        marked = []
+        for image in (winner, loser):
+            if hasattr(self.data_manager, 'bin_image'):
+                success = self.data_manager.bin_image(image)
+            else:
+                if not hasattr(self.data_manager, 'binned_images'):
+                    self.data_manager.binned_images = set()
+                success = image not in self.data_manager.binned_images
+                if success:
+                    self.data_manager.binned_images.add(image)
+            if success:
+                marked.append(image)
+                print(f"VotingController: Marked {image} as binned")
+            else:
+                print(f"VotingController: {image} was already binned, skipping")
+
+        if not marked:
+            if self.status_bar:
+                self.status_bar.config(text="Both images were already binned")
+            return
+
+        # Step 2 — Purge each marked image's vote history from active images.
+        # Both images are already in binned_images, so the cross-vote between
+        # them is safely skipped by purge_binned_image_votes — no interleaving
+        # needed. Every remaining active image is cleaned correctly.
+        for image in marked:
+            if hasattr(self.data_manager, 'purge_binned_image_votes'):
+                result = self.data_manager.purge_binned_image_votes(image)
+                print(f"VotingController: Purged {image}: {result}")
+
+        # Step 3 — Move files physically.
+        binned, errors = [], []
+        for image in marked:
+            move_ok, err = self.image_binner.move_image_to_bin(image)
+            if move_ok:
+                binned.append(image)
+                print(f"VotingController: Moved {image} to Bin")
+            else:
+                # File move failed — reverse only this image's bin mark.
+                # Its votes were already purged from active images, which is
+                # an acceptable trade-off vs. leaving stale data in the pool.
+                if hasattr(self.data_manager, 'binned_images'):
+                    self.data_manager.binned_images.discard(image)
+                errors.append(f"{image}: {err}")
+                print(f"VotingController: File move failed for {image}: {err}")
+
+        self._update_stats_display()
+
+        if binned:
+            msg = f"🗑️🗑️ Both binned: {', '.join(binned)}"
+            if errors:
+                msg += f" | Errors: {'; '.join(errors)}"
+        else:
+            msg = f"Bin-both failed: {'; '.join(errors)}"
+
+        if self.status_bar:
+            self.status_bar.config(text=msg)
+
     def refresh_current_pair(self) -> None:
         """Refresh the currently displayed pair."""
         if self.current_pair[0] and self.current_pair[1]:
@@ -526,7 +630,7 @@ class VotingController:
         self.next_pair = (None, None)
         self.previous_pair = (None, None)
         self.last_vote_result = None
-        self.bin_next_loser = False  # Reset bin mode
+        self.bin_mode = 0  # Reset bin mode
         
         if self.left_vote_button:
             self.left_vote_button.config(state=tk.DISABLED, text="Vote for this image (←)", bg=Colors.BUTTON_SUCCESS)

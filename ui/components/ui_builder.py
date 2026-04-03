@@ -138,6 +138,7 @@ class UIBuilder:
             ("Save Progress", "save_data", Colors.BUTTON_INFO),
             ("Load Progress", "load_data", Colors.BUTTON_INFO),
             ("Purge Binned Votes", "purge_binned_votes", Colors.BUTTON_WARNING),
+            ("Export Top N", "export_top_images", Colors.BUTTON_SECONDARY),
             ("View Stats", "show_stats", Colors.BUTTON_WARNING),
             ("Prompt Analysis", "show_prompt_analysis", Colors.BUTTON_INFO),
             ("Settings", "show_settings", Colors.BUTTON_NEUTRAL)

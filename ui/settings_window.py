@@ -36,6 +36,7 @@ class SettingsWindow:
         self._cutline_buffer_var      = None
         self._zone_base_votes_var     = None
         self._zone_votes_per_tier_var = None
+        self._min_votes_before_cut_var = None
         self._cutline_preview_label   = None
     
     def show(self):
@@ -414,6 +415,9 @@ Tier Analysis:"""
         if self._zone_votes_per_tier_var is not None:
             self.data_manager.algorithm_settings.set_value(
                 'zone_votes_per_tier', round(float(self._zone_votes_per_tier_var.get()), 2))
+        if self._min_votes_before_cut_var is not None:
+            self.data_manager.algorithm_settings.set_value(
+                'min_votes_before_cut', int(self._min_votes_before_cut_var.get()))
 
         messagebox.showinfo("Success",
             "Settings updated successfully!\n\n"
@@ -660,6 +664,21 @@ Tier Analysis:"""
                  bg=Colors.BG_SECONDARY, fg=Colors.TEXT_PRIMARY,
                  troughcolor=Colors.BG_TERTIARY).pack(side=tk.LEFT, padx=5)
 
+        # --- Min votes before cut (Fix A / Fix B gate) ---
+        row5 = tk.Frame(section, bg=Colors.BG_SECONDARY)
+        row5.pack(fill=tk.X, padx=20, pady=4)
+        tk.Label(row5, text="Min Votes Before Cut:",
+                 font=('Arial', 11), fg=Colors.TEXT_PRIMARY,
+                 bg=Colors.BG_SECONDARY, width=30, anchor='w').pack(side=tk.LEFT)
+        self._min_votes_before_cut_var = tk.IntVar(value=s.min_votes_before_cut)
+        tk.Spinbox(row5, from_=1, to=50, textvariable=self._min_votes_before_cut_var,
+                   width=6, command=self.update_cutline_preview_display).pack(side=tk.LEFT, padx=5)
+        tk.Label(row5,
+                 text="hard minimum votes before any image can be confirmed_out  "
+                      "(Fix A gate + Fix B graduated buffer)",
+                 font=('Arial', 9, 'italic'), fg=Colors.TEXT_SECONDARY,
+                 bg=Colors.BG_SECONDARY).pack(side=tk.LEFT, padx=5)
+
         # --- Live preview label ---
         self._cutline_preview_label = tk.Label(
             section, text="", font=('Arial', 10),
@@ -689,8 +708,9 @@ Tier Analysis:"""
             buf   = int(self._cutline_buffer_var.get())   if self._cutline_buffer_var   else 2
             bv    = int(self._zone_base_votes_var.get())  if self._zone_base_votes_var  else 5
             vpt   = float(self._zone_votes_per_tier_var.get()) if self._zone_votes_per_tier_var else 0.5
+            mvc   = int(self._min_votes_before_cut_var.get()) if self._min_votes_before_cut_var else 8
         except (ValueError, tk.TclError):
-            buf, bv, vpt = 2, 5, 0.5
+            buf, bv, vpt, mvc = 2, 5, 0.5, 8
 
         active = self.data_manager.get_active_images()
         n = len(active)
@@ -706,16 +726,34 @@ Tier Analysis:"""
             reverse=True)
         cutline = self.data_manager.image_stats[sorted_imgs[tc - 1]].get('current_tier', 0)
 
-        # Count zones using live parameter values
+        # Count zones — mirrors get_zone() logic including Fix A and Fix B
         confirmed_in = confirmed_out = boundary = 0
+        full_confidence_votes = mvc * 2
         for img in active:
             tier  = self.data_manager.image_stats[img].get('current_tier', 0)
             votes = self.data_manager.image_stats[img].get('votes', 0)
             dist  = abs(tier - cutline)
             min_v = max(1, bv + round(dist * vpt))
+
+            # Fix A: hard gate — no confirmed_out below mvc
+            if votes < mvc:
+                if tier >= cutline + buf and votes >= min_v:
+                    confirmed_in += 1
+                else:
+                    boundary += 1
+                continue
+
+            # Fix B: graduated extra out-buffer
+            if votes < full_confidence_votes:
+                maturity = (votes - mvc) / max(full_confidence_votes - mvc, 1)
+                extra_out_buf = round(buf * (1.0 - maturity))
+            else:
+                extra_out_buf = 0
+            effective_out_buf = buf + extra_out_buf
+
             if tier >= cutline + buf and votes >= min_v:
                 confirmed_in += 1
-            elif tier <= cutline - buf and votes >= min_v:
+            elif tier <= cutline - effective_out_buf and votes >= min_v:
                 confirmed_out += 1
             else:
                 boundary += 1

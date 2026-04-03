@@ -180,6 +180,119 @@ class DataManager:
             'binned_processed': len(self.binned_images)
         }
     
+    def export_top_images(self, n: int) -> list:
+        """Identify and prepare the top N images for export (full reset).
+
+        Operation order is critical for correctness when exported images have
+        voted against each other:
+
+        1. Sort active images by tier (then wins as tiebreak), take top N.
+        2. Mark ALL of them as binned atomically — before any purge runs.
+           This ensures that when we purge image A's votes, image B (also
+           exported) is already in binned_images and is safely skipped by
+           purge_binned_image_votes(), preventing cross-vote corrections from
+           distorting each other.
+        3. Purge each exported image's vote history from the remaining active
+           images in sequence.
+        4. Fully wipe the exported images from image_stats, metadata_cache,
+           and binned_images — as if they were never in the system.
+        5. Return the list of filenames so the caller can move the files.
+
+        Args:
+            n: Number of top-ranked images to export.
+
+        Returns:
+            List of image filenames that were prepared for export.
+        """
+        active = self.get_active_images()
+        if not active:
+            return []
+
+        n = min(n, len(active))
+
+        # Step 1: Sort by tier desc, wins desc as tiebreak
+        sorted_active = sorted(
+            active,
+            key=lambda img: (
+                self.image_stats[img].get('current_tier', 0),
+                self.image_stats[img].get('wins', 0)
+            ),
+            reverse=True
+        )
+        to_export = sorted_active[:n]
+
+        print(f"\n[Export] Preparing to export top {len(to_export)} image(s)...")
+        for img in to_export:
+            tier  = self.image_stats[img].get('current_tier', 0)
+            votes = self.image_stats[img].get('votes', 0)
+            wins  = self.image_stats[img].get('wins', 0)
+            print(f"  {img}  (tier={tier}, votes={votes}, wins={wins})")
+
+        # Step 2: Mark ALL as binned atomically before any purge
+        for img in to_export:
+            self.bin_image(img)
+        print(f"[Export] Marked {len(to_export)} image(s) as binned.")
+
+        # Step 3: Purge each exported image's votes from remaining active images
+        total_votes_removed = 0
+        for img in to_export:
+            result = self.purge_binned_image_votes(img)
+            total_votes_removed += result['total_votes_removed']
+        print(f"[Export] Vote purge complete — {total_votes_removed} vote(s) removed from active images.")
+
+        # Step 4: Full wipe — remove from all data structures
+        for img in to_export:
+            self.image_stats.pop(img, None)
+            self.binned_images.discard(img)
+            self.metadata_cache.pop(img, None)
+        print(f"[Export] Wiped {len(to_export)} image(s) from data. Export ready.\n")
+
+        return to_export
+
+    def export_specific_images(self, names: list) -> list:
+        """Export a caller-supplied list of images (full reset).
+
+        Same atomic bin-all → purge → wipe sequence as export_top_images,
+        but the caller decides which images to include (e.g. after the user
+        has toggled images in the preview window).
+
+        Returns the list of names that were actually processed (skips any
+        name not in image_stats or already binned).
+        """
+        active_set = set(self.get_active_images())
+        to_export = [n for n in names if n in active_set]
+
+        if not to_export:
+            print("[Export] No valid images to export.")
+            return []
+
+        print(f"\n[Export] Exporting {len(to_export)} selected image(s)...")
+        for img in to_export:
+            tier  = self.image_stats[img].get('current_tier', 0)
+            votes = self.image_stats[img].get('votes', 0)
+            wins  = self.image_stats[img].get('wins', 0)
+            print(f"  {img}  (tier={tier}, votes={votes}, wins={wins})")
+
+        # Step 1: Mark ALL as binned atomically before any purge
+        for img in to_export:
+            self.bin_image(img)
+
+        # Step 2: Purge votes from remaining active images
+        total_removed = 0
+        for img in to_export:
+            result = self.purge_binned_image_votes(img)
+            total_removed += result['total_votes_removed']
+        print(f"[Export] Vote purge complete — {total_removed} vote(s) removed.")
+
+        # Step 3: Full wipe
+        for img in to_export:
+            self.image_stats.pop(img, None)
+            self.binned_images.discard(img)
+            self.metadata_cache.pop(img, None)
+        print(f"[Export] Wiped {len(to_export)} image(s) from data.\n")
+
+        return to_export
+
     def is_image_binned(self, image_name: str) -> bool:
         """Check if an image is binned."""
         if not hasattr(self, 'binned_images'):
@@ -388,8 +501,21 @@ class DataManager:
           'eliminated'    – image is binned
           'disabled'      – target_count == 0 (cutline system off)
           'confirmed_in'  – tier >= cutline + buffer AND enough votes
-          'confirmed_out' – tier <= cutline - buffer AND enough votes
+          'confirmed_out' – tier <= cutline - (buffer + extra) AND enough votes
           'boundary'      – everything else (near cutline, or too few votes)
+
+        Fix A — Hard minimum vote gate:
+          No image can be confirmed_out until it has at least
+          min_votes_before_cut votes. This prevents unlucky early
+          matchups from sending low-vote images out of the pool.
+
+        Fix B — Confidence-weighted extra tier buffer:
+          Images that have JUST cleared the minimum threshold still
+          carry an extra tier buffer that shrinks linearly to 0 as
+          votes climb from min_votes_before_cut to 2× that value.
+          This means a fresh image must be further below the cutline
+          before it can be confirmed_out, even if it technically has
+          enough votes to qualify.
         """
         if self.is_image_binned(image_name):
             return 'eliminated'
@@ -400,11 +526,37 @@ class DataManager:
         tier   = stats.get('current_tier', 0)
         votes  = stats.get('votes', 0)
         buffer = self.algorithm_settings.cutline_buffer_tiers
+        min_cut_votes = self.algorithm_settings.min_votes_before_cut
+
+        # --- Fix A: hard gate ---
+        # Images below the threshold are never confirmed_out.
+        # (confirmed_in is still allowed — a dominant image can be confirmed
+        # in early since that direction only helps it, not harms it.)
+        if votes < min_cut_votes:
+            # Can still be confirmed_in if well above cutline
+            if tier >= cutline + buffer:
+                min_v = self._get_zone_min_votes(tier - cutline)
+                if votes >= min_v:
+                    return 'confirmed_in'
+            return 'boundary'
+
+        # --- Fix B: graduated extra out-buffer for recently-eligible images ---
+        # Between min_cut_votes and 2× min_cut_votes the extra buffer shrinks
+        # from cutline_buffer_tiers → 0 (linear).
+        full_confidence_votes = min_cut_votes * 2
+        if votes < full_confidence_votes:
+            maturity = (votes - min_cut_votes) / max(full_confidence_votes - min_cut_votes, 1)
+            extra_out_buffer = round(buffer * (1.0 - maturity))
+        else:
+            extra_out_buffer = 0
+
+        effective_out_buffer = buffer + extra_out_buffer
+
         if tier >= cutline + buffer:
             min_v = self._get_zone_min_votes(tier - cutline)
             if votes >= min_v:
                 return 'confirmed_in'
-        elif tier <= cutline - buffer:
+        elif tier <= cutline - effective_out_buffer:
             min_v = self._get_zone_min_votes(cutline - tier)
             if votes >= min_v:
                 return 'confirmed_out'
