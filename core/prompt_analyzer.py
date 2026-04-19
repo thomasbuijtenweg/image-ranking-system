@@ -2,19 +2,59 @@
 
 import re
 import os
-import statistics
-from typing import Dict, List, Tuple, Any
+import math
+from typing import Dict, List, Tuple, Any, Optional
 from collections import defaultdict
 
 from core.data_manager import DataManager
 
 
+def _fast_mean(data: list) -> float:
+    """Fast float mean — avoids statistics.mean's exact-arithmetic overhead."""
+    if not data:
+        return 0.0
+    return sum(data) / len(data)
+
+
+def _fast_stdev(data: list) -> float:
+    """Fast float stdev — avoids statistics.stdev's exact-arithmetic overhead."""
+    n = len(data)
+    if n <= 1:
+        return 0.0
+    mean = sum(data) / n
+    variance = sum((x - mean) ** 2 for x in data) / (n - 1)
+    return math.sqrt(variance)
+
+
 class PromptAnalyzer:
     """Analyzes prompt text to find correlations between words and image tiers, including word combinations."""
+    
+    # How many example images to cache per word. The UI only ever displays
+    # the first 3–5, so keeping 5 is plenty.
+    EXAMPLES_PER_WORD = 5
     
     def __init__(self, data_manager: DataManager):
         self.data_manager = data_manager
         self.rare_word_threshold = 3
+        # Cache for analyze_word_performance. Invalidated by a cheap state key
+        # (vote_count, n_images, n_binned) — changes to any of these always
+        # accompany any change that would affect word analysis.
+        self._word_analysis_cache: Optional[Dict[str, Dict[str, Any]]] = None
+        self._word_examples_cache: Dict[str, List[str]] = {}
+        self._cache_key: Optional[Tuple[int, int, int]] = None
+
+    def _current_cache_key(self) -> Tuple[int, int, int]:
+        return (
+            self.data_manager.vote_count,
+            len(self.data_manager.image_stats),
+            len(self.data_manager.binned_images),
+        )
+
+    def invalidate_cache(self) -> None:
+        """Force the next analyze_word_performance call to rebuild."""
+        self._word_analysis_cache = None
+        self._word_examples_cache = {}
+        self._cache_key = None
     
     def extract_main_prompt(self, full_prompt: str) -> str:
         """Extract the main/positive prompt from the full prompt text."""
@@ -69,11 +109,20 @@ class PromptAnalyzer:
         """
         Analyze word performance with separate handling for active and binned images.
         
+        Cached on (vote_count, n_images, n_binned) — repeated calls in the same
+        UI render pass return immediately. A per-word example_images inverted
+        index is built during the same pass so hover previews can O(1)-lookup.
+        
         Returns:
             Dictionary with enhanced word statistics including binning data
         """
+        cache_key = self._current_cache_key()
+        if self._word_analysis_cache is not None and self._cache_key == cache_key:
+            return self._word_analysis_cache
+
         active_word_data = defaultdict(list)  # tier data for active images
         binned_word_data = defaultdict(int)   # frequency count for binned images
+        word_examples = defaultdict(list)     # inverted index: word → [image_names]
         
         for image_name, stats in self.data_manager.image_stats.items():
             prompt = stats.get('prompt')
@@ -82,41 +131,23 @@ class PromptAnalyzer:
             
             main_prompt = self.extract_main_prompt(prompt)
             words = self.extract_words(main_prompt)
+            unique_words = set(words)
+            is_binned = self.data_manager.is_image_binned(image_name)
             
-            if self.data_manager.is_image_binned(image_name):
-                # Binned images: just count word frequency
-                for word in set(words):
+            if is_binned:
+                for word in unique_words:
                     binned_word_data[word] += 1
             else:
-                # Active images: full tier analysis
                 current_tier = stats.get('current_tier', 0)
-                for word in set(words):
+                for word in unique_words:
                     active_word_data[word].append(current_tier)
-        
-        # Also check binned images in the Bin folder for additional prompts
-        # NOTE: This requires image_processor to be passed to PromptAnalyzer or accessed via data_manager
-        # For now, this section is commented out. The binning analysis will still work for all images
-        # that have been tracked in image_stats (which should be all images that were voted on)
-        
-        # if self.data_manager.image_folder and hasattr(self, 'image_processor'):
-        #     binned_files = self.image_processor.get_binned_image_files(
-        #         self.data_manager.image_folder)
-        #     
-        #     for binned_file in binned_files:
-        #         if binned_file not in self.data_manager.image_stats:
-        #             # This handles binned images that might not be in our stats
-        #             try:
-        #                 bin_folder = os.path.join(self.data_manager.image_folder, "Bin")
-        #                 binned_path = os.path.join(bin_folder, binned_file)
-        #                 prompt = self.image_processor.extract_prompt_from_image(binned_path)
-        #                 
-        #                 if prompt:
-        #                     main_prompt = self.extract_main_prompt(prompt)
-        #                     words = self.extract_words(main_prompt)
-        #                     for word in set(words):
-        #                         binned_word_data[word] += 1
-        #             except Exception as e:
-        #                 print(f"Error processing binned image {binned_file}: {e}")
+            
+            # Build example-images inverted index (cap per word to bound memory).
+            # Active images are preferred, but binned are accepted when no active
+            # example has been collected yet.
+            for word in unique_words:
+                if len(word_examples[word]) < self.EXAMPLES_PER_WORD:
+                    word_examples[word].append(image_name)
         
         # Combine the analysis
         word_analysis = {}
@@ -126,10 +157,10 @@ class PromptAnalyzer:
             active_tiers = active_word_data.get(word, [])
             binned_count = binned_word_data.get(word, 0)
             
-            # Calculate active image statistics
+            # Calculate active image statistics (fast float math)
             active_frequency = len(active_tiers)
-            average_tier = statistics.mean(active_tiers) if active_tiers else 0
-            std_deviation = statistics.stdev(active_tiers) if len(active_tiers) > 1 else 0.0
+            average_tier = _fast_mean(active_tiers)
+            std_deviation = _fast_stdev(active_tiers)
             
             # Calculate binning statistics
             total_frequency = active_frequency + binned_count
@@ -164,11 +195,23 @@ class PromptAnalyzer:
                 'is_rare': is_rare,
                 
                 # Legacy fields for backward compatibility
-                'frequency': total_frequency,  # Keep for existing code
-                'tiers': active_tiers  # Keep for existing code
+                'frequency': total_frequency,
+                'tiers': active_tiers
             }
         
+        # Commit cache
+        self._word_analysis_cache = word_analysis
+        self._word_examples_cache = dict(word_examples)
+        self._cache_key = cache_key
+        
         return word_analysis
+
+    def get_example_images_for_word(self, word: str, limit: int = 5) -> List[str]:
+        """O(1) lookup of example images for a word, using the cached inverted
+        index built during analyze_word_performance."""
+        # Ensure cache is built (cheap no-op if already current).
+        self.analyze_word_performance()
+        return list(self._word_examples_cache.get(word.lower(), []))[:limit]
     
     def _calculate_quality_indicator(self, active_tiers: List[int], binned_count: int) -> float:
         """
@@ -191,7 +234,7 @@ class PromptAnalyzer:
             return -2.0
         
         # Base score from active tier performance
-        avg_tier = statistics.mean(active_tiers)
+        avg_tier = _fast_mean(active_tiers)
         
         # Penalty based on binning rate
         binning_rate = binned_count / total_images
@@ -361,13 +404,13 @@ class PromptAnalyzer:
             expected_performance = (word1_avg + word2_avg) / 2
             
             # Calculate actual performance
-            actual_performance = statistics.mean(tier_values)
+            actual_performance = _fast_mean(tier_values)
             
             # Calculate synergy score
             synergy_score = actual_performance - expected_performance
             
             # Calculate statistical significance
-            pair_std = statistics.stdev(tier_values) if len(tier_values) > 1 else 0.0
+            pair_std = _fast_stdev(tier_values)
             
             pair_analysis[pair] = {
                 'word1': word1,
@@ -429,7 +472,7 @@ class PromptAnalyzer:
         sample_size_factor = min(len(tier_values) / 15.0, 1.0)
         
         # Consistency factor (lower std deviation = higher confidence)
-        std_dev = statistics.stdev(tier_values)
+        std_dev = _fast_stdev(tier_values)
         consistency_factor = 1.0 / (1.0 + std_dev)
         
         # Effect size factor (larger absolute synergy score = higher confidence)
@@ -443,31 +486,47 @@ class PromptAnalyzer:
     def get_combination_examples(self, word1: str, word2: str, max_examples: int = 5) -> List[str]:
         """
         Get example images that contain both words in the pair.
-        
+
+        Fast path: intersect the cached single-word example indexes. This is
+        an approximation bounded by EXAMPLES_PER_WORD per word (5), but it
+        returns near-instantly instead of rescanning every prompt in the
+        dataset on every call. Falls back to a full scan only when the
+        cached intersection is empty AND both words actually co-occur
+        somewhere in the analysis (which means the cache sampled different
+        images for each — rare, and worth the rescan cost in that case).
+
         Args:
             word1: First word in the pair
             word2: Second word in the pair
             max_examples: Maximum number of examples to return
-            
+
         Returns:
             List of image filenames containing both words
         """
-        examples = []
         word1_lower = word1.lower()
         word2_lower = word2.lower()
-        
+
+        # Build cache if stale, then intersect the per-word example lists.
+        self.analyze_word_performance()
+        ex1 = set(self._word_examples_cache.get(word1_lower, []))
+        ex2 = set(self._word_examples_cache.get(word2_lower, []))
+        intersection = [img for img in self._word_examples_cache.get(word1_lower, [])
+                        if img in ex2]
+        if intersection:
+            return intersection[:max_examples]
+
+        # Fallback: full rescan (rare path — only when cached samples didn't
+        # overlap but the pair genuinely co-occurs).
+        examples = []
         for image_name, stats in self.data_manager.image_stats.items():
             if self.data_manager.is_image_binned(image_name):
                 continue
-                
             prompt = stats.get('prompt')
             if not prompt:
                 continue
-                
             try:
                 main_prompt = self.extract_main_prompt(prompt)
                 words = self.extract_words(main_prompt)
-                
                 if word1_lower in words and word2_lower in words:
                     examples.append(image_name)
                     if len(examples) >= max_examples:
@@ -475,7 +534,6 @@ class PromptAnalyzer:
             except Exception as e:
                 print(f"Error processing prompt for {image_name} when finding combination examples: {e}")
                 continue
-        
         return examples
     
     def get_top_synergistic_pairs(self, min_frequency: int = 3, count: int = 10) -> List[Tuple[Tuple[str, str], Dict[str, Any]]]:
@@ -532,7 +590,7 @@ class PromptAnalyzer:
                 'synergistic_count': len(synergistic),
                 'antagonistic_count': len(antagonistic),
                 'neutral_count': len(neutral),
-                'avg_synergy_score': statistics.mean(synergy_scores),
+                'avg_synergy_score': _fast_mean(synergy_scores),
                 'strongest_synergy': strongest_synergy,
                 'strongest_antagonism': strongest_antagonism
             }

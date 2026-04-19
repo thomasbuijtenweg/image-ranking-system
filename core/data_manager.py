@@ -1,6 +1,7 @@
 """Enhanced Data Manager with image binning support - tier bounds system removed."""
 
 import os
+import time
 from typing import Dict, Any, Optional, Tuple
 from collections import defaultdict
 
@@ -52,7 +53,7 @@ class DataManager:
         print(f"Image '{image_name}' has been binned")
         return True
     
-    def purge_binned_image_votes(self, binned_image: str) -> Dict[str, Any]:
+    def purge_binned_image_votes(self, binned_image: str, verbose: bool = True) -> Dict[str, Any]:
         """
         Remove all vote history involving a binned image from active images.
         
@@ -128,10 +129,10 @@ class DataManager:
             stats['tier_history'] = new_tier_history
             
             print(f"  Purged {votes_removed} vote(s) involving '{binned_image}' from '{img_name}' "
-                  f"(tier: {old_tier} -> {new_tier})")
+                  f"(tier: {old_tier} -> {new_tier})") if verbose else None
         
         print(f"Vote purge complete for '{binned_image}': "
-              f"{affected_images} images affected, {total_votes_removed} votes removed")
+              f"{affected_images} images affected, {total_votes_removed} votes removed") if verbose else None
         
         return {
             'affected_images': affected_images,
@@ -151,33 +152,43 @@ class DataManager:
         if not self.binned_images:
             print("No binned images found - nothing to purge")
             return {'total_affected': 0, 'total_removed': 0, 'binned_processed': 0}
-        
+
         total_affected = 0
         total_removed = 0
-        
-        for binned_image in list(self.binned_images):
+        n_binned = len(self.binned_images)
+        # For bulk purges, emit a single progress line every ~20 images
+        # instead of per-image spam. Threshold chosen so small datasets
+        # still show per-image output for debugging.
+        quiet = n_binned > 20
+        progress_step = max(1, n_binned // 10)  # ~10 updates across the run
+
+        for idx, binned_image in enumerate(list(self.binned_images)):
             # Check if any active image still has matchup history with this binned image
             has_stale_votes = any(
                 binned_image in [opp for opp, _, _ in stats.get('matchup_history', [])]
                 for img_name, stats in self.image_stats.items()
                 if img_name != binned_image and img_name not in self.binned_images
             )
-            
+
             if has_stale_votes:
-                result = self.purge_binned_image_votes(binned_image)
+                result = self.purge_binned_image_votes(binned_image, verbose=not quiet)
                 total_affected += result['affected_images']
                 total_removed += result['total_votes_removed']
-        
+
+            if quiet and (idx + 1) % progress_step == 0:
+                print(f"  [Purge] ...processed {idx + 1}/{n_binned} binned images "
+                      f"({total_removed} votes removed so far)")
+
         if total_removed > 0:
             print(f"Purge complete: {total_removed} stale vote(s) removed "
-                  f"from {total_affected} image(s) across {len(self.binned_images)} binned image(s)")
+                  f"from {total_affected} image(s) across {n_binned} binned image(s)")
         else:
             print("Purge complete: no stale votes found (already clean)")
-        
+
         return {
             'total_affected': total_affected,
             'total_removed': total_removed,
-            'binned_processed': len(self.binned_images)
+            'binned_processed': n_binned
         }
     
     def export_top_images(self, n: int) -> list:
@@ -361,22 +372,37 @@ class DataManager:
         loser_stats['matchup_history'].append((winner, False, self.vote_count))
     
     def save_to_file(self, filename: str, filter_state: Optional[Dict[str, Any]] = None) -> bool:
-        """Save all ranking data including tested pairs and optional filter state."""
-        # Convert sets to lists for JSON serialization
+        """Save all ranking data with lossless space optimizations.
+
+        Two fields are stripped before serialization and rebuilt on load:
+          1. stats['tested_against']  — derivable from matchup_history (every
+             opponent in the history is a tested pair by construction).
+          2. metadata_cache[img]['prompt'] and ['display_metadata'] — these
+             are already stored per-image in image_stats. The cache only
+             needs 'last_modified' to validate the mtime on reload.
+        """
+        # Serialize image_stats, stripping tested_against (derivable on load).
         serializable_stats = {}
         for img_name, stats in self.image_stats.items():
             stats_copy = stats.copy()
-            # Convert set to list for JSON
-            if 'tested_against' in stats_copy:
-                stats_copy['tested_against'] = list(stats_copy['tested_against'])
+            stats_copy.pop('tested_against', None)
             serializable_stats[img_name] = stats_copy
-        
+
+        # Slim metadata_cache to just the mtime per image. Prompt and
+        # display_metadata are already in image_stats — no reason to store
+        # them twice. Drop entries that have no mtime to store.
+        minimal_cache = {
+            name: {'last_modified': entry['last_modified']}
+            for name, entry in self.metadata_cache.items()
+            if isinstance(entry, dict) and 'last_modified' in entry
+        }
+
         # Prepare core data
         core_data = {
             'image_folder': self.image_folder,
             'vote_count': self.vote_count,
-            'image_stats': serializable_stats,  # Use serializable version
-            'metadata_cache': self.metadata_cache,
+            'image_stats': serializable_stats,
+            'metadata_cache': minimal_cache,
             'binned_images': list(self.binned_images)
         }
         
@@ -392,45 +418,115 @@ class DataManager:
         return self.data_persistence.save_to_file(filename, save_data)
 
     def load_from_file(self, filename: str) -> Tuple[bool, str]:
-        """Load ranking data including tested pairs."""
-        # Load data from file
+        """Load ranking data including tested pairs.
+
+        Emits step-by-step progress logging so the user can see what's
+        happening — each numbered step prints what it's doing, how many
+        items it's processing, and how long it took. A stuck step is
+        easy to spot because the next [Load] line never appears.
+        """
+        t_start = time.perf_counter()
+        print(f"\n[Load] ========== Loading save file ==========")
+        print(f"[Load] File: {filename}")
+
+        # --- Step 1/8: read and parse JSON ---
+        print("[Load] Step 1/8: Reading JSON file from disk...")
+        t = time.perf_counter()
         success, data, error_msg = self.data_persistence.load_from_file(filename)
         if not success:
+            print(f"[Load] FAILED at step 1: {error_msg}")
             return False, error_msg
-        
-        # Validate and fix data
+        print(f"[Load] Step 1/8: Parsed JSON in {(time.perf_counter()-t)*1000:.0f} ms")
+
+        # --- Step 2/8: validate/fix data ---
+        print("[Load] Step 2/8: Validating data integrity...")
+        t = time.perf_counter()
         data = self.data_persistence.validate_and_fix_data(data)
-        
-        # Extract core data
+        print(f"[Load] Step 2/8: Validated in {(time.perf_counter()-t)*1000:.0f} ms")
+
+        # --- Step 3/8: extract core data ---
+        print("[Load] Step 3/8: Extracting core data...")
+        t = time.perf_counter()
         core_data = self.data_persistence.extract_core_data(data)
-        self.image_folder = core_data['image_folder']
-        self.vote_count = core_data['vote_count']
-        self.image_stats = core_data['image_stats']
+        self.image_folder   = core_data['image_folder']
+        self.vote_count     = core_data['vote_count']
+        self.image_stats    = core_data['image_stats']
         self.metadata_cache = core_data['metadata_cache']
-        self.binned_images = core_data['binned_images']
-        
-        # Convert tested_against lists back to sets
+        self.binned_images  = core_data['binned_images']
+        n_images = len(self.image_stats)
+        n_binned = len(self.binned_images)
+        print(f"[Load] Step 3/8: {n_images} images, {n_binned} binned, "
+              f"{self.vote_count} total votes | folder: {self.image_folder}")
+        print(f"[Load] Step 3/8: Done in {(time.perf_counter()-t)*1000:.0f} ms")
+
+        # --- Step 4/8: rebuild tested_against ---
+        print(f"[Load] Step 4/8: Rebuilding tested_against index for {n_images} images...")
+        t = time.perf_counter()
+        legacy_count = 0
+        derived_count = 0
+        total_pairs = 0
         for img_name, stats in self.image_stats.items():
             if 'tested_against' in stats and isinstance(stats['tested_against'], list):
+                # Old format
                 stats['tested_against'] = set(stats['tested_against'])
-            elif 'tested_against' not in stats:
-                stats['tested_against'] = set()  # Add missing field for old saves
-        
-        # Load other settings
+                legacy_count += 1
+            else:
+                # New format — derive from matchup_history
+                matchup_history = stats.get('matchup_history', [])
+                stats['tested_against'] = {entry[0] for entry in matchup_history if entry}
+                derived_count += 1
+            total_pairs += len(stats['tested_against'])
+        print(f"[Load] Step 4/8: Rebuilt in {(time.perf_counter()-t)*1000:.0f} ms "
+              f"({legacy_count} legacy, {derived_count} derived, {total_pairs} total pair entries)")
+
+        # --- Step 5/8: load weights + algorithm settings ---
+        print("[Load] Step 5/8: Loading weight manager and algorithm settings...")
+        t = time.perf_counter()
         self.weight_manager.load_from_data(data)
         self.algorithm_settings.load_settings(data)
-        
-        # Load similarity cache if one exists for this folder
+        print(f"[Load] Step 5/8: Done in {(time.perf_counter()-t)*1000:.0f} ms")
+
+        # --- Step 6/8: load similarity (CLIP) cache ---
+        print("[Load] Step 6/8: Loading CLIP similarity cache...")
+        t = time.perf_counter()
         if self.image_folder:
-            self.similarity_manager.load_cache(self.image_folder)
-        
-        # Update existing images with strategic timing
+            loaded = self.similarity_manager.load_cache(self.image_folder)
+            if loaded:
+                n_emb = len(self.similarity_manager.filenames)
+                print(f"[Load] Step 6/8: Loaded {n_emb} embeddings in "
+                      f"{(time.perf_counter()-t)*1000:.0f} ms")
+            else:
+                print(f"[Load] Step 6/8: No CLIP cache found for this folder "
+                      f"(took {(time.perf_counter()-t)*1000:.0f} ms to check)")
+        else:
+            print("[Load] Step 6/8: Skipped (no image folder set)")
+
+        # --- Step 7/8: purge stale votes from binned images ---
+        if self.binned_images:
+            print(f"[Load] Step 7/8: Purging stale votes from {n_binned} binned image(s)...")
+            t = time.perf_counter()
+            self.purge_all_binned_image_votes()
+            print(f"[Load] Step 7/8: Purge complete in {(time.perf_counter()-t)*1000:.0f} ms")
+        else:
+            print("[Load] Step 7/8: No binned images to purge — skipped")
+
+        # --- Step 8/8: initialise image stats + restore metadata ---
+        print(f"[Load] Step 8/8: Initialising per-image stats for {n_images} images...")
+        t = time.perf_counter()
         self._update_existing_images_with_strategic_timing()
-        
-        # Initialize all image stats (ensures tested_against field exists)
-        for image_filename in self.image_stats:
+        # Loop with progress reporting every 500 images so large datasets
+        # don't feel stuck during the per-image initialisation pass.
+        progress_step = 500 if n_images >= 1000 else (100 if n_images >= 200 else 0)
+        for i, image_filename in enumerate(self.image_stats):
             self.initialize_image_stats(image_filename)
-        
+            if progress_step and (i + 1) % progress_step == 0:
+                print(f"[Load]   ...processed {i + 1}/{n_images} images "
+                      f"({(time.perf_counter()-t):.1f}s elapsed)")
+        print(f"[Load] Step 8/8: Done in {(time.perf_counter()-t)*1000:.0f} ms")
+
+        total_ms = (time.perf_counter() - t_start) * 1000
+        print(f"[Load] ========== Load complete in {total_ms:.0f} ms "
+              f"({n_images} images, {self.vote_count} votes) ==========\n")
         return True, ""
     
     def get_pair_stats(self) -> Dict[str, Any]:
@@ -494,7 +590,7 @@ class DataManager:
         per_t = self.algorithm_settings.zone_votes_per_tier
         return max(1, base + round(tier_distance * per_t))
 
-    def get_zone(self, image_name: str) -> str:
+    def get_zone(self, image_name: str, cutline: Optional[int] = None) -> str:
         """Classify an image into a cutline zone.
 
         Returns one of:
@@ -503,6 +599,12 @@ class DataManager:
           'confirmed_in'  – tier >= cutline + buffer AND enough votes
           'confirmed_out' – tier <= cutline - (buffer + extra) AND enough votes
           'boundary'      – everything else (near cutline, or too few votes)
+
+        PERFORMANCE: Callers that classify many images in a row should call
+        get_cutline_tier() ONCE and pass the result in via the `cutline`
+        parameter. When `cutline` is None, it is computed internally —
+        but that internal call is O(N log N), so doing it per-image creates
+        an O(N² log N) loop. Passing the precomputed value avoids that.
 
         Fix A — Hard minimum vote gate:
           No image can be confirmed_out until it has at least
@@ -519,7 +621,8 @@ class DataManager:
         """
         if self.is_image_binned(image_name):
             return 'eliminated'
-        cutline = self.get_cutline_tier()
+        if cutline is None:
+            cutline = self.get_cutline_tier()
         if cutline is None:
             return 'disabled'
         stats  = self.get_image_stats(image_name)
@@ -566,10 +669,12 @@ class DataManager:
         """Return a dict of zone counts and cutline metadata."""
         counts = {'confirmed_in': 0, 'boundary': 0, 'confirmed_out': 0,
                   'eliminated': 0, 'disabled': 0}
+        # Compute cutline ONCE (it's O(N log N)) and reuse for every image.
+        cutline = self.get_cutline_tier()
         for img in self.image_stats:
-            zone = self.get_zone(img)
+            zone = self.get_zone(img, cutline=cutline)
             counts[zone] = counts.get(zone, 0) + 1
-        counts['cutline_tier']  = self.get_cutline_tier()
+        counts['cutline_tier']  = cutline
         counts['target_count']  = self.algorithm_settings.target_count
         counts['total_active']  = self.get_active_image_count()
         return counts
@@ -788,7 +893,13 @@ class DataManager:
     
     def update_metadata_cache(self, image_filename: str, prompt: Optional[str] = None, 
                              display_metadata: Optional[str] = None) -> None:
-        """Update the metadata cache for an image."""
+        """Update the metadata cache for an image.
+
+        The cache now only records the file mtime — prompt and display_metadata
+        are already stored per-image in image_stats, so duplicating them here
+        would just bloat the save file. The prompt/display_metadata arguments
+        are kept for API compatibility but are no longer written to the cache.
+        """
         try:
             if self.image_folder:
                 img_path = os.path.join(self.image_folder, image_filename)
@@ -798,19 +909,17 @@ class DataManager:
                     if image_filename not in self.metadata_cache:
                         self.metadata_cache[image_filename] = {}
                     
-                    cache_entry = self.metadata_cache[image_filename]
-                    
-                    if prompt is not None:
-                        cache_entry['prompt'] = prompt
-                    if display_metadata is not None:
-                        cache_entry['display_metadata'] = display_metadata
-                    
-                    cache_entry['last_modified'] = current_mtime
+                    self.metadata_cache[image_filename]['last_modified'] = current_mtime
         except OSError:
             pass
 
     def restore_metadata_from_cache(self, image_filename: str) -> None:
-        """Restore metadata from cache if available and valid."""
+        """Restore metadata from cache if available and valid.
+
+        Safe for both legacy caches (which stored the full prompt) and the
+        optimised cache (which stores only 'last_modified'). Never overwrites
+        an existing image_stats value with None.
+        """
         if image_filename not in self.metadata_cache:
             return
         
@@ -825,8 +934,14 @@ class DataManager:
                     
                     if abs(current_mtime - cached_mtime) < 1.0:
                         stats = self.image_stats[image_filename]
-                        stats['prompt'] = cached_data.get('prompt')
-                        stats['display_metadata'] = cached_data.get('display_metadata')
+                        # Only copy values actually present in the cache.
+                        # Legacy caches include prompt/display_metadata;
+                        # optimised caches do not, and image_stats already
+                        # has the correct values from the save file.
+                        if 'prompt' in cached_data and cached_data['prompt'] is not None:
+                            stats['prompt'] = cached_data['prompt']
+                        if 'display_metadata' in cached_data and cached_data['display_metadata'] is not None:
+                            stats['display_metadata'] = cached_data['display_metadata']
                         return
         except (OSError, KeyError):
             pass

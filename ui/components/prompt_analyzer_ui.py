@@ -388,34 +388,23 @@ class PromptAnalyzerUI:
     def get_example_images_for_word(self, word: str) -> List[str]:
         """
         Get example images that contain a specific word.
-        
+
+        Delegates to PromptAnalyzer's cached inverted index — which was
+        built during the same single pass as analyze_word_performance —
+        so this is an O(1) dict lookup instead of a full rescan of every
+        prompt in the dataset per call.
+
         Args:
             word: Word to search for
-            
+
         Returns:
             List of image filenames containing the word
         """
-        example_images = []
-        word_lower = word.lower()
-        
         try:
-            for image_name, stats in self.data_manager.image_stats.items():
-                prompt = stats.get('prompt', '')
-                if prompt:
-                    try:
-                        main_prompt = self.prompt_analyzer.extract_main_prompt(prompt)
-                        words = self.prompt_analyzer.extract_words(main_prompt)
-                        if word_lower in words:
-                            example_images.append(image_name)
-                            if len(example_images) >= 5:  # Limit for performance
-                                break
-                    except Exception as e:
-                        print(f"Error processing prompt for {image_name} when finding examples for '{word}': {e}")
-                        continue
+            return self.prompt_analyzer.get_example_images_for_word(word, limit=5)
         except Exception as e:
             print(f"Error getting example images for word '{word}': {e}")
-        
-        return example_images
+            return []
     
     def on_tree_hover(self, event):
         """

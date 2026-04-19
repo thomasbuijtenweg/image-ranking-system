@@ -1,8 +1,17 @@
 """Confidence calculation for the Image Ranking System."""
 
 import math
-import statistics
 from typing import Dict, Any
+
+
+def _fast_stdev(data: list) -> float:
+    """Fast float stdev — avoids statistics.stdev's exact-arithmetic overhead."""
+    n = len(data)
+    if n <= 1:
+        return 0.0
+    mean = sum(data) / n
+    variance = sum((x - mean) ** 2 for x in data) / (n - 1)
+    return math.sqrt(variance)
 
 from core.data_manager import DataManager
 
@@ -53,7 +62,7 @@ class ConfidenceCalculator:
         if len(tier_history) <= 1:
             return 0.0
         
-        return statistics.stdev(tier_history)
+        return _fast_stdev(tier_history)
     
     def get_confidence_breakdown(self, image_name: str) -> Dict[str, Any]:
         """
