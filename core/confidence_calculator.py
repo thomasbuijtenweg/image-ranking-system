@@ -3,15 +3,7 @@
 import math
 from typing import Dict, Any
 
-
-def _fast_stdev(data: list) -> float:
-    """Fast float stdev — avoids statistics.stdev's exact-arithmetic overhead."""
-    n = len(data)
-    if n <= 1:
-        return 0.0
-    mean = sum(data) / n
-    variance = sum((x - mean) ** 2 for x in data) / (n - 1)
-    return math.sqrt(variance)
+from core._math import _fast_stdev
 
 from core.data_manager import DataManager
 

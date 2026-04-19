@@ -10,6 +10,9 @@ from core.weight_manager import WeightManager
 from core.data_persistence import DataPersistence
 from core.algorithm_settings import AlgorithmSettings
 from core.similarity_manager import SimilarityManager
+from core.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 
 class DataManager:
@@ -42,15 +45,11 @@ class DataManager:
         Returns:
             True if successfully binned, False if already binned
         """
-        # Ensure binned_images exists
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        
         if image_name in self.binned_images:
             return False
         
         self.binned_images.add(image_name)
-        print(f"Image '{image_name}' has been binned")
+        log.info("Image '%s' has been binned", image_name)
         return True
     
     def purge_binned_image_votes(self, binned_image: str, verbose: bool = True) -> Dict[str, Any]:
@@ -70,9 +69,6 @@ class DataManager:
         Returns:
             Dict with purge statistics
         """
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        
         affected_images = 0
         total_votes_removed = 0
         
@@ -128,11 +124,13 @@ class DataManager:
             stats['current_tier'] = new_tier
             stats['tier_history'] = new_tier_history
             
-            print(f"  Purged {votes_removed} vote(s) involving '{binned_image}' from '{img_name}' "
-                  f"(tier: {old_tier} -> {new_tier})") if verbose else None
+            if verbose:
+                log.debug("  Purged %d vote(s) involving '%s' from '%s' (tier: %s -> %s)",
+                         votes_removed, binned_image, img_name, old_tier, new_tier)
         
-        print(f"Vote purge complete for '{binned_image}': "
-              f"{affected_images} images affected, {total_votes_removed} votes removed") if verbose else None
+        if verbose:
+            log.info("Vote purge complete for '%s': %d images affected, %d votes removed",
+                     binned_image, affected_images, total_votes_removed)
         
         return {
             'affected_images': affected_images,
@@ -150,7 +148,7 @@ class DataManager:
             Dict with purge statistics
         """
         if not self.binned_images:
-            print("No binned images found - nothing to purge")
+            log.info("No binned images found - nothing to purge")
             return {'total_affected': 0, 'total_removed': 0, 'binned_processed': 0}
 
         total_affected = 0
@@ -176,14 +174,14 @@ class DataManager:
                 total_removed += result['total_votes_removed']
 
             if quiet and (idx + 1) % progress_step == 0:
-                print(f"  [Purge] ...processed {idx + 1}/{n_binned} binned images "
-                      f"({total_removed} votes removed so far)")
+                log.debug("  [Purge] ...processed %d/%d binned images (%d votes removed so far)",
+                          idx + 1, n_binned, total_removed)
 
         if total_removed > 0:
-            print(f"Purge complete: {total_removed} stale vote(s) removed "
-                  f"from {total_affected} image(s) across {n_binned} binned image(s)")
+            log.info("Purge complete: %d stale vote(s) removed from %d image(s) across %d binned image(s)",
+                     total_removed, total_affected, n_binned)
         else:
-            print("Purge complete: no stale votes found (already clean)")
+            log.info("Purge complete: no stale votes found (already clean)")
 
         return {
             'total_affected': total_affected,
@@ -232,31 +230,31 @@ class DataManager:
         )
         to_export = sorted_active[:n]
 
-        print(f"\n[Export] Preparing to export top {len(to_export)} image(s)...")
+        log.info("[Export] Preparing to export top %d image(s)...", len(to_export))
         for img in to_export:
             tier  = self.image_stats[img].get('current_tier', 0)
             votes = self.image_stats[img].get('votes', 0)
             wins  = self.image_stats[img].get('wins', 0)
-            print(f"  {img}  (tier={tier}, votes={votes}, wins={wins})")
+            log.debug("  %s  (tier=%s, votes=%s, wins=%s)", img, tier, votes, wins)
 
         # Step 2: Mark ALL as binned atomically before any purge
         for img in to_export:
             self.bin_image(img)
-        print(f"[Export] Marked {len(to_export)} image(s) as binned.")
+        log.info("[Export] Marked %d image(s) as binned.", len(to_export))
 
         # Step 3: Purge each exported image's votes from remaining active images
         total_votes_removed = 0
         for img in to_export:
             result = self.purge_binned_image_votes(img)
             total_votes_removed += result['total_votes_removed']
-        print(f"[Export] Vote purge complete — {total_votes_removed} vote(s) removed from active images.")
+        log.info("[Export] Vote purge complete — %d vote(s) removed from active images.", total_votes_removed)
 
         # Step 4: Full wipe — remove from all data structures
         for img in to_export:
             self.image_stats.pop(img, None)
             self.binned_images.discard(img)
             self.metadata_cache.pop(img, None)
-        print(f"[Export] Wiped {len(to_export)} image(s) from data. Export ready.\n")
+        log.info("[Export] Wiped %d image(s) from data. Export ready.", len(to_export))
 
         return to_export
 
@@ -274,15 +272,15 @@ class DataManager:
         to_export = [n for n in names if n in active_set]
 
         if not to_export:
-            print("[Export] No valid images to export.")
+            log.info("[Export] No valid images to export.")
             return []
 
-        print(f"\n[Export] Exporting {len(to_export)} selected image(s)...")
+        log.info("[Export] Exporting %d selected image(s)...", len(to_export))
         for img in to_export:
             tier  = self.image_stats[img].get('current_tier', 0)
             votes = self.image_stats[img].get('votes', 0)
             wins  = self.image_stats[img].get('wins', 0)
-            print(f"  {img}  (tier={tier}, votes={votes}, wins={wins})")
+            log.debug("  %s  (tier=%s, votes=%s, wins=%s)", img, tier, votes, wins)
 
         # Step 1: Mark ALL as binned atomically before any purge
         for img in to_export:
@@ -293,33 +291,27 @@ class DataManager:
         for img in to_export:
             result = self.purge_binned_image_votes(img)
             total_removed += result['total_votes_removed']
-        print(f"[Export] Vote purge complete — {total_removed} vote(s) removed.")
+        log.info("[Export] Vote purge complete — %d vote(s) removed.", total_removed)
 
         # Step 3: Full wipe
         for img in to_export:
             self.image_stats.pop(img, None)
             self.binned_images.discard(img)
             self.metadata_cache.pop(img, None)
-        print(f"[Export] Wiped {len(to_export)} image(s) from data.\n")
+        log.info("[Export] Wiped %d image(s) from data.", len(to_export))
 
         return to_export
 
     def is_image_binned(self, image_name: str) -> bool:
         """Check if an image is binned."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
         return image_name in self.binned_images
     
     def get_active_images(self) -> list:
         """Get list of active (non-binned) image names."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
         return [img for img in self.image_stats.keys() if img not in self.binned_images]
     
     def get_binned_images(self) -> list:
         """Get list of binned image names."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
         return list(self.binned_images)
     
     def get_active_image_count(self) -> int:
@@ -328,8 +320,6 @@ class DataManager:
     
     def get_binned_image_count(self) -> int:
         """Get count of binned images."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
         return len(self.binned_images)
     
     def has_pair_been_tested(self, img1: str, img2: str) -> bool:
@@ -426,26 +416,26 @@ class DataManager:
         easy to spot because the next [Load] line never appears.
         """
         t_start = time.perf_counter()
-        print(f"\n[Load] ========== Loading save file ==========")
-        print(f"[Load] File: {filename}")
+        log.info("[Load] ========== Loading save file ==========")
+        log.info("[Load] File: %s", filename)
 
         # --- Step 1/8: read and parse JSON ---
-        print("[Load] Step 1/8: Reading JSON file from disk...")
+        log.info("[Load] Step 1/8: Reading JSON file from disk...")
         t = time.perf_counter()
         success, data, error_msg = self.data_persistence.load_from_file(filename)
         if not success:
-            print(f"[Load] FAILED at step 1: {error_msg}")
+            log.error("[Load] FAILED at step 1: %s", error_msg)
             return False, error_msg
-        print(f"[Load] Step 1/8: Parsed JSON in {(time.perf_counter()-t)*1000:.0f} ms")
+        log.info("[Load] Step 1/8: Parsed JSON in %.0f ms", (time.perf_counter()-t)*1000)
 
         # --- Step 2/8: validate/fix data ---
-        print("[Load] Step 2/8: Validating data integrity...")
+        log.info("[Load] Step 2/8: Validating data integrity...")
         t = time.perf_counter()
         data = self.data_persistence.validate_and_fix_data(data)
-        print(f"[Load] Step 2/8: Validated in {(time.perf_counter()-t)*1000:.0f} ms")
+        log.info("[Load] Step 2/8: Validated in %.0f ms", (time.perf_counter()-t)*1000)
 
         # --- Step 3/8: extract core data ---
-        print("[Load] Step 3/8: Extracting core data...")
+        log.info("[Load] Step 3/8: Extracting core data...")
         t = time.perf_counter()
         core_data = self.data_persistence.extract_core_data(data)
         self.image_folder   = core_data['image_folder']
@@ -455,12 +445,12 @@ class DataManager:
         self.binned_images  = core_data['binned_images']
         n_images = len(self.image_stats)
         n_binned = len(self.binned_images)
-        print(f"[Load] Step 3/8: {n_images} images, {n_binned} binned, "
-              f"{self.vote_count} total votes | folder: {self.image_folder}")
-        print(f"[Load] Step 3/8: Done in {(time.perf_counter()-t)*1000:.0f} ms")
+        log.info("[Load] Step 3/8: %d images, %d binned, %d total votes | folder: %s",
+                 n_images, n_binned, self.vote_count, self.image_folder)
+        log.info("[Load] Step 3/8: Done in %.0f ms", (time.perf_counter()-t)*1000)
 
         # --- Step 4/8: rebuild tested_against ---
-        print(f"[Load] Step 4/8: Rebuilding tested_against index for {n_images} images...")
+        log.info("[Load] Step 4/8: Rebuilding tested_against index for %d images...", n_images)
         t = time.perf_counter()
         legacy_count = 0
         derived_count = 0
@@ -476,42 +466,42 @@ class DataManager:
                 stats['tested_against'] = {entry[0] for entry in matchup_history if entry}
                 derived_count += 1
             total_pairs += len(stats['tested_against'])
-        print(f"[Load] Step 4/8: Rebuilt in {(time.perf_counter()-t)*1000:.0f} ms "
-              f"({legacy_count} legacy, {derived_count} derived, {total_pairs} total pair entries)")
+        log.info("[Load] Step 4/8: Rebuilt in %.0f ms (%d legacy, %d derived, %d total pair entries)",
+                 (time.perf_counter()-t)*1000, legacy_count, derived_count, total_pairs)
 
         # --- Step 5/8: load weights + algorithm settings ---
-        print("[Load] Step 5/8: Loading weight manager and algorithm settings...")
+        log.info("[Load] Step 5/8: Loading weight manager and algorithm settings...")
         t = time.perf_counter()
         self.weight_manager.load_from_data(data)
         self.algorithm_settings.load_settings(data)
-        print(f"[Load] Step 5/8: Done in {(time.perf_counter()-t)*1000:.0f} ms")
+        log.info("[Load] Step 5/8: Done in %.0f ms", (time.perf_counter()-t)*1000)
 
         # --- Step 6/8: load similarity (CLIP) cache ---
-        print("[Load] Step 6/8: Loading CLIP similarity cache...")
+        log.info("[Load] Step 6/8: Loading CLIP similarity cache...")
         t = time.perf_counter()
         if self.image_folder:
             loaded = self.similarity_manager.load_cache(self.image_folder)
             if loaded:
                 n_emb = len(self.similarity_manager.filenames)
-                print(f"[Load] Step 6/8: Loaded {n_emb} embeddings in "
-                      f"{(time.perf_counter()-t)*1000:.0f} ms")
+                log.info("[Load] Step 6/8: Loaded %d embeddings in %.0f ms",
+                         n_emb, (time.perf_counter()-t)*1000)
             else:
-                print(f"[Load] Step 6/8: No CLIP cache found for this folder "
-                      f"(took {(time.perf_counter()-t)*1000:.0f} ms to check)")
+                log.info("[Load] Step 6/8: No CLIP cache found for this folder (took %.0f ms to check)",
+                         (time.perf_counter()-t)*1000)
         else:
-            print("[Load] Step 6/8: Skipped (no image folder set)")
+            log.info("[Load] Step 6/8: Skipped (no image folder set)")
 
         # --- Step 7/8: purge stale votes from binned images ---
         if self.binned_images:
-            print(f"[Load] Step 7/8: Purging stale votes from {n_binned} binned image(s)...")
+            log.info("[Load] Step 7/8: Purging stale votes from %d binned image(s)...", n_binned)
             t = time.perf_counter()
             self.purge_all_binned_image_votes()
-            print(f"[Load] Step 7/8: Purge complete in {(time.perf_counter()-t)*1000:.0f} ms")
+            log.info("[Load] Step 7/8: Purge complete in %.0f ms", (time.perf_counter()-t)*1000)
         else:
-            print("[Load] Step 7/8: No binned images to purge — skipped")
+            log.info("[Load] Step 7/8: No binned images to purge — skipped")
 
         # --- Step 8/8: initialise image stats + restore metadata ---
-        print(f"[Load] Step 8/8: Initialising per-image stats for {n_images} images...")
+        log.info("[Load] Step 8/8: Initialising per-image stats for %d images...", n_images)
         t = time.perf_counter()
         self._update_existing_images_with_strategic_timing()
         # Loop with progress reporting every 500 images so large datasets
@@ -520,13 +510,13 @@ class DataManager:
         for i, image_filename in enumerate(self.image_stats):
             self.initialize_image_stats(image_filename)
             if progress_step and (i + 1) % progress_step == 0:
-                print(f"[Load]   ...processed {i + 1}/{n_images} images "
-                      f"({(time.perf_counter()-t):.1f}s elapsed)")
-        print(f"[Load] Step 8/8: Done in {(time.perf_counter()-t)*1000:.0f} ms")
+                log.debug("[Load]   ...processed %d/%d images (%.1fs elapsed)",
+                          i + 1, n_images, time.perf_counter()-t)
+        log.info("[Load] Step 8/8: Done in %.0f ms", (time.perf_counter()-t)*1000)
 
         total_ms = (time.perf_counter() - t_start) * 1000
-        print(f"[Load] ========== Load complete in {total_ms:.0f} ms "
-              f"({n_images} images, {self.vote_count} votes) ==========\n")
+        log.info("[Load] ========== Load complete in %.0f ms (%d images, %d votes) ==========",
+                 total_ms, n_images, self.vote_count)
         return True, ""
     
     def get_pair_stats(self) -> Dict[str, Any]:
@@ -691,9 +681,6 @@ class DataManager:
 
     def get_tier_distribution(self) -> Dict[int, int]:
         """Get the distribution of ACTIVE images across tiers."""
-        if not hasattr(self, 'binned_images'):
-            self.binned_images = set()
-        
         tier_counts = defaultdict(int)
         for img_name, stats in self.image_stats.items():
             if img_name not in self.binned_images:  # Only active images
@@ -703,10 +690,6 @@ class DataManager:
     def get_overall_statistics(self) -> Dict[str, Any]:
         """Calculate overall statistics with enhanced error handling and backward compatibility."""
         try:
-            # Ensure binned_images exists
-            if not hasattr(self, 'binned_images'):
-                self.binned_images = set()
-            
             active_images = self.get_active_images()
             total_active_images = len(active_images)
             total_binned_images = len(self.binned_images)
@@ -733,7 +716,7 @@ class DataManager:
                 )
                 avg_votes_per_active_image = total_active_votes / total_active_images
             except (KeyError, ZeroDivisionError, TypeError) as e:
-                print(f"Error calculating average votes per active image: {e}")
+                log.error("Error calculating average votes per active image: %s", e)
                 avg_votes_per_active_image = 0
             
             # Calculate average votes per total image (for backward compatibility)
@@ -744,7 +727,7 @@ class DataManager:
                 )
                 avg_votes_per_image = total_all_votes / total_images if total_images > 0 else 0
             except (KeyError, ZeroDivisionError, TypeError) as e:
-                print(f"Error calculating average votes per total image: {e}")
+                log.error("Error calculating average votes per total image: %s", e)
                 avg_votes_per_image = 0
             
             return {
@@ -758,7 +741,7 @@ class DataManager:
             }
             
         except Exception as e:
-            print(f"Error in get_overall_statistics: {e}")
+            log.error("Error in get_overall_statistics: %s", e)
             # Return safe defaults
             return {
                 'total_images': len(self.image_stats),
@@ -878,7 +861,7 @@ class DataManager:
                 updated_count += 1
         
         if updated_count > 0:
-            print(f"Updated {updated_count} never-voted images with strategic timing")
+            log.info("Updated %d never-voted images with strategic timing", updated_count)
     
     def set_image_metadata(self, image_filename: str, prompt: Optional[str] = None, 
                           display_metadata: Optional[str] = None) -> None:

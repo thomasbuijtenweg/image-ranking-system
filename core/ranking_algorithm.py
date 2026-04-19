@@ -1,22 +1,23 @@
 """Ranking algorithm for intelligent pair selection based on tier overflow and confidence - tier bounds system removed."""
 
-import random
 import math
-from typing import List, Tuple, Dict, Any, Optional, Set
+from typing import List, Tuple, Dict, Any, Optional
 from collections import defaultdict
 
-
-def _fast_stdev(data: list) -> float:
-    """Fast float stdev — avoids statistics.stdev's exact-arithmetic overhead."""
-    n = len(data)
-    if n <= 1:
-        return 0.0
-    mean = sum(data) / n
-    variance = sum((x - mean) ** 2 for x in data) / (n - 1)
-    return math.sqrt(variance)
+from core._math import _fast_stdev
 
 from core.data_manager import DataManager
 from core.confidence_calculator import ConfidenceCalculator
+from core.logging_setup import get_logger
+
+log = get_logger(__name__)
+
+
+# When True, every pair selection prints a ~60-line scoring breakdown for
+# both the LEFT and RIGHT images. Useful for understanding why the algorithm
+# picked a given pair; excessive for normal voting. Flip to True only when
+# tuning the selection weights or investigating unexpected picks.
+_DEBUG_SELECTION = False
 
 
 class RankingAlgorithm:
@@ -64,15 +65,15 @@ class RankingAlgorithm:
                               if self.data_manager.get_image_stats(img).get('votes', 0) <= hard_limit_threshold]
             
             if hard_excluded:
-                print(f"\n[Hard Vote Ceiling] Avg votes: {avg_votes:.1f} | Threshold: {hard_limit_threshold:.1f} "
-                      f"(×{hard_limit_multiplier}) | Excluded {len(hard_excluded)} image(s)")
+                log.info("[Hard Vote Ceiling] Avg votes: %.1f | Threshold: %.1f (×%s) | Excluded %d image(s)",
+                         avg_votes, hard_limit_threshold, hard_limit_multiplier, len(hard_excluded))
             
             # Only apply the hard limit if it still leaves enough images to vote on
             if len(votable_images) >= 2:
                 active_images = votable_images
             elif hard_excluded:
-                print(f"[Hard Vote Ceiling] Too few images would remain ({len(votable_images)}), "
-                      f"suspending hard limit for this round.")
+                log.info("[Hard Vote Ceiling] Too few images would remain (%d), suspending hard limit for this round.",
+                         len(votable_images))
         if len(active_images) < 2:
             return None, None
 
@@ -89,12 +90,11 @@ class RankingAlgorithm:
             ]
             if len(zone_filtered) >= 2:
                 pairing_images = zone_filtered
-                print(f"[Cutline] Active — Tier {cutline_tier} | "
-                      f"Boundary pool: {len(pairing_images)} of {len(active_images)} images")
+                log.info("[Cutline] Active — Tier %s | Boundary pool: %d of %d images",
+                         cutline_tier, len(pairing_images), len(active_images))
             else:
                 pairing_images = active_images   # safety fallback
-                print(f"[Cutline] Too few boundary images ({len(zone_filtered)}), "
-                      f"using full pool")
+                log.info("[Cutline] Too few boundary images (%d), using full pool", len(zone_filtered))
         else:
             pairing_images = active_images       # cutline disabled
 
@@ -193,10 +193,10 @@ class RankingAlgorithm:
 
         # Log mean shift when it moves meaningfully
         if hasattr(self, '_last_logged_mean') and abs(self._last_logged_mean - mean_tier) > 0.5:
-            print(f"Distribution center shifted to tier {mean_tier:.2f} (was {self._last_logged_mean:.2f})")
+            log.info("Distribution center shifted to tier %.2f (was %.2f)", mean_tier, self._last_logged_mean)
             self._last_logged_mean = mean_tier
         elif not hasattr(self, '_last_logged_mean'):
-            print(f"Distribution centered at tier {mean_tier:.2f}")
+            log.info("Distribution centered at tier %.2f", mean_tier)
             self._last_logged_mean = mean_tier
         
         # Get overflow settings from algorithm_settings
@@ -216,63 +216,9 @@ class RankingAlgorithm:
         
         return overflowing_tiers
     
-    def _select_most_overflowing_tier(self, overflowing_tiers: List[int], active_images: List[str]) -> int:
-        """Select the most overflowing tier from the list - NOW PRIORITIZES LOWEST TIERS."""
-        if not overflowing_tiers:
-            return 0
-        
-        # CHANGED: Always select the LOWEST tier when multiple are overflowing
-        # This ensures we focus on cleaning up low-tier images first for faster dataset reduction
-        lowest_tier = min(overflowing_tiers)
-        
-        # Optional: Log which tier was selected for transparency
-        if len(overflowing_tiers) > 1:
-            print(f"Multiple tiers overflowing {overflowing_tiers}, selecting lowest: {lowest_tier} for low-tier focus")
-        
-        return lowest_tier
-        
-        # NOTE: Original logic below is kept commented for reference/easy rollback
-        # The original logic selected the tier with the highest overflow amount
-        # # Calculate overflow amount for each tier
-        # tier_counts = defaultdict(int)
-        # for img in active_images:  # Use active_images instead of available_images
-        #     tier = self.data_manager.get_image_stats(img).get('current_tier', 0)
-        #     tier_counts[tier] += 1
-        # 
-        # total_images = len(active_images)
-        # max_overflow = 0
-        # most_overflowing_tier = overflowing_tiers[0]
-        # 
-        # overflow_threshold = self.data_manager.algorithm_settings.overflow_threshold
-        # 
-        # for tier in overflowing_tiers:
-        #     actual_count = tier_counts[tier]
-        #     expected_proportion = self._calculate_expected_tier_proportion(tier, total_images)
-        #     expected_count = expected_proportion * total_images * overflow_threshold
-        #     
-        #     overflow_amount = actual_count - expected_count
-        #     if overflow_amount > max_overflow:
-        #         max_overflow = overflow_amount
-        #         most_overflowing_tier = tier
-        # 
-        # return most_overflowing_tier
-    
     def _calculate_image_confidence(self, image_name: str) -> float:
         """Calculate confidence score for an image based on tier stability and vote count."""
         return self.confidence_calculator.calculate_image_confidence(image_name)
-    
-    def _calculate_stability_confidence(self, image_name: str) -> float:
-        """Calculate stability confidence using simplified square root approach."""
-        stats = self.data_manager.get_image_stats(image_name)
-        votes = stats.get('votes', 0)
-        
-        if votes == 0:
-            return 0.0  # No confidence for untested images
-        
-        tier_stability = self._calculate_tier_stability(image_name)
-        effective_stability = tier_stability / math.sqrt(votes)
-        
-        return 1.0 / (1.0 + effective_stability)
     
     def _select_lowest_confidence_image(self, tier: int, tier_images: List[str]) -> Optional[str]:
         """Select image with low confidence, prioritizing under-tested images."""
@@ -324,52 +270,53 @@ class RankingAlgorithm:
         
         combined_scores.sort(key=lambda x: x[0], reverse=True)
         
-        print("\n=== LEFT Image Selection (Low Confidence + Under-tested Priority) ===")
-        print(f"Tier {tier} has {len(combined_scores)} candidates")
-        print(f"Weight: 50% Confidence (inverted) + 20% Recency + 30% Vote Deficiency  →  × Overvote Penalty")
-        print(f"Min votes threshold: {min_votes_threshold} | Avg votes: {avg_votes:.1f} | Max votes threshold: {dynamic_max_votes_threshold:.1f} (×{max_votes_multiplier})\n")
-        
-        top_candidates = combined_scores[:min(2, len(combined_scores))]
-        for i, (score, conf, recency, votes, vote_def, tier_stab, tier_hist, ov_mult, img) in enumerate(top_candidates):
-            status = "✓ SELECTED" if i == 0 else "  Runner-up"
-            conf_contribution = (1.0 - conf) * 0.5
-            recency_normalized = recency / max(1, current_vote_count + 1)
-            recency_contribution = recency_normalized * 0.2
-            vote_contribution = vote_def * 0.3
-            base = conf_contribution + recency_contribution + vote_contribution
+        if _DEBUG_SELECTION:
+            print("\n=== LEFT Image Selection (Low Confidence + Under-tested Priority) ===")
+            print(f"Tier {tier} has {len(combined_scores)} candidates")
+            print(f"Weight: 50% Confidence (inverted) + 20% Recency + 30% Vote Deficiency  →  × Overvote Penalty")
+            print(f"Min votes threshold: {min_votes_threshold} | Avg votes: {avg_votes:.1f} | Max votes threshold: {dynamic_max_votes_threshold:.1f} (×{max_votes_multiplier})\n")
             
-            under_tested_marker = " [UNDER-TESTED]" if votes < min_votes_threshold else ""
-            overvoted_marker = " [OVERVOTED]" if ov_mult < 1.0 else ""
+            top_candidates = combined_scores[:min(2, len(combined_scores))]
+            for i, (score, conf, recency, votes, vote_def, tier_stab, tier_hist, ov_mult, img) in enumerate(top_candidates):
+                status = "✓ SELECTED" if i == 0 else "  Runner-up"
+                conf_contribution = (1.0 - conf) * 0.5
+                recency_normalized = recency / max(1, current_vote_count + 1)
+                recency_contribution = recency_normalized * 0.2
+                vote_contribution = vote_def * 0.3
+                base = conf_contribution + recency_contribution + vote_contribution
+                
+                under_tested_marker = " [UNDER-TESTED]" if votes < min_votes_threshold else ""
+                overvoted_marker = " [OVERVOTED]" if ov_mult < 1.0 else ""
 
-            # Image description
-            img_stats = self.data_manager.get_image_stats(img)
+                # Image description
+                img_stats = self.data_manager.get_image_stats(img)
 
-            print(f"{status} #{i+1}: {img}{under_tested_marker}{overvoted_marker}")
-            print(f"    Combined Score: {score:.4f}")
-            
-            if votes > 0:
-                effective_stability = tier_stab / math.sqrt(votes) if votes > 0 else 0
-                print(f"    - Confidence: {conf:.4f}")
-                print(f"        • Tier History: {tier_hist}")
-                print(f"        • Tier Stability (stdev): {tier_stab:.4f}")
-                print(f"        • Vote Count: {votes} → sqrt({votes}) = {math.sqrt(votes):.4f}")
-                print(f"        • Effective Stability: {tier_stab:.4f} / {math.sqrt(votes):.4f} = {effective_stability:.4f}")
-                print(f"        • Confidence Formula: 1 / (1 + {effective_stability:.4f}) = {conf:.4f}")
-            else:
-                print(f"    - Confidence: {conf:.4f} (0 votes = 0 confidence)")
-            
-            print(f"        → Inverted: {1.0-conf:.4f} → Contribution: {conf_contribution:.4f} (50%)")
-            print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_contribution:.4f} (20%)")
-            print(f"    - Vote Count: {votes} votes → Deficiency: {vote_def:.4f} → Contribution: {vote_contribution:.4f} (30%)")
-            print(f"    - Base score: {base:.4f}  × Overvote Penalty Multiplier: {ov_mult:.4f}  = {score:.4f}")
-            
-            if i == 0 and len(combined_scores) > 1:
-                margin = score - combined_scores[1][0]
-                print(f"    ▶ Won by margin: {margin:.4f}")
-            elif i > 0:
-                deficit = combined_scores[0][0] - score
-                print(f"    ▶ Lost by margin: {deficit:.4f}")
-            print()
+                print(f"{status} #{i+1}: {img}{under_tested_marker}{overvoted_marker}")
+                print(f"    Combined Score: {score:.4f}")
+                
+                if votes > 0:
+                    effective_stability = tier_stab / math.sqrt(votes) if votes > 0 else 0
+                    print(f"    - Confidence: {conf:.4f}")
+                    print(f"        • Tier History: {tier_hist}")
+                    print(f"        • Tier Stability (stdev): {tier_stab:.4f}")
+                    print(f"        • Vote Count: {votes} → sqrt({votes}) = {math.sqrt(votes):.4f}")
+                    print(f"        • Effective Stability: {tier_stab:.4f} / {math.sqrt(votes):.4f} = {effective_stability:.4f}")
+                    print(f"        • Confidence Formula: 1 / (1 + {effective_stability:.4f}) = {conf:.4f}")
+                else:
+                    print(f"    - Confidence: {conf:.4f} (0 votes = 0 confidence)")
+                
+                print(f"        → Inverted: {1.0-conf:.4f} → Contribution: {conf_contribution:.4f} (50%)")
+                print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_contribution:.4f} (20%)")
+                print(f"    - Vote Count: {votes} votes → Deficiency: {vote_def:.4f} → Contribution: {vote_contribution:.4f} (30%)")
+                print(f"    - Base score: {base:.4f}  × Overvote Penalty Multiplier: {ov_mult:.4f}  = {score:.4f}")
+                
+                if i == 0 and len(combined_scores) > 1:
+                    margin = score - combined_scores[1][0]
+                    print(f"    ▶ Won by margin: {margin:.4f}")
+                elif i > 0:
+                    deficit = combined_scores[0][0] - score
+                    print(f"    ▶ Lost by margin: {deficit:.4f}")
+                print()
         
         return combined_scores[0][8]
     
@@ -455,53 +402,54 @@ class RankingAlgorithm:
         left_prompt_short = left_prompt[:120] + "…" if len(left_prompt) > 120 else left_prompt
 
         sim_mode = "50% Similarity + 30% Recency + 20% Confidence" if similarity_ready else "40% Confidence + 60% Recency (no index)"
-        print("\n=== RIGHT Image Selection (Recency Priority + High Confidence) ===")
-        print(f"Tier {tier} has {len(scored_images)} candidates (excluding LEFT image)")
-        print(f"Weight: {sim_mode}  →  × Overvote Penalty")
-        print(f"Avg votes: {avg_votes:.1f} | Max votes threshold: {avg_votes * max_votes_multiplier:.1f} (×{max_votes_multiplier})")
-        print(f"LEFT image : {exclude_image}")
+        if _DEBUG_SELECTION:
+            print("\n=== RIGHT Image Selection (Recency Priority + High Confidence) ===")
+            print(f"Tier {tier} has {len(scored_images)} candidates (excluding LEFT image)")
+            print(f"Weight: {sim_mode}  →  × Overvote Penalty")
+            print(f"Avg votes: {avg_votes:.1f} | Max votes threshold: {avg_votes * max_votes_multiplier:.1f} (×{max_votes_multiplier})")
+            print(f"LEFT image : {exclude_image}")
 
 
-        
-        top_candidates = scored_images[:min(2, len(scored_images))]
-        for i, (score, conf, recency, votes, tier_stab, tier_hist, ov_mult, similarity, img) in enumerate(top_candidates):
-            status = "✓ SELECTED" if i == 0 else "  Runner-up"
-            recency_normalized = recency / max(1, current_vote_count + 1)
-            overvoted_marker = " [OVERVOTED]" if ov_mult < 1.0 else ""
             
-            # Candidate description
-            cand_stats = self.data_manager.get_image_stats(img)
-            cand_prompt = cand_stats.get('prompt') or cand_stats.get('display_metadata') or "(no description)"
-            cand_prompt_short = cand_prompt[:120] + "…" if len(cand_prompt) > 120 else cand_prompt
+            top_candidates = scored_images[:min(2, len(scored_images))]
+            for i, (score, conf, recency, votes, tier_stab, tier_hist, ov_mult, similarity, img) in enumerate(top_candidates):
+                status = "✓ SELECTED" if i == 0 else "  Runner-up"
+                recency_normalized = recency / max(1, current_vote_count + 1)
+                overvoted_marker = " [OVERVOTED]" if ov_mult < 1.0 else ""
+                
+                # Candidate description
+                cand_stats = self.data_manager.get_image_stats(img)
+                cand_prompt = cand_stats.get('prompt') or cand_stats.get('display_metadata') or "(no description)"
+                cand_prompt_short = cand_prompt[:120] + "…" if len(cand_prompt) > 120 else cand_prompt
 
-            print(f"{status} #{i+1}: {img}{overvoted_marker}")
-            if similarity_ready:
-                sim_pct = similarity * 100
-                bar_filled = int(sim_pct / 5)
-                sim_bar = "█" * bar_filled + "░" * (20 - bar_filled)
-                print(f"    CLIP Similarity to LEFT: {sim_pct:5.1f}%  [{sim_bar}]  → Contribution: {similarity * 0.5:.4f}")
-            print(f"    Combined Score: {score:.4f}")
+                print(f"{status} #{i+1}: {img}{overvoted_marker}")
+                if similarity_ready:
+                    sim_pct = similarity * 100
+                    bar_filled = int(sim_pct / 5)
+                    sim_bar = "█" * bar_filled + "░" * (20 - bar_filled)
+                    print(f"    CLIP Similarity to LEFT: {sim_pct:5.1f}%  [{sim_bar}]  → Contribution: {similarity * 0.5:.4f}")
+                print(f"    Combined Score: {score:.4f}")
+                
+                if votes > 0:
+                    print(f"    - Confidence: {conf:.4f} (stdev={tier_stab:.3f}, votes={votes}) → Contribution: {conf * (0.2 if similarity_ready else 0.4):.4f}")
+                else:
+                    print(f"    - Confidence: {conf:.4f} (0 votes)")
+                
+                print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_normalized * (0.3 if similarity_ready else 0.6):.4f}")
+                print(f"    - Overvote Penalty: ×{ov_mult:.4f}  → Final: {score:.4f}")
+                
+                if i == 0 and len(scored_images) > 1:
+                    print(f"    ▶ Won by margin: {score - scored_images[1][0]:.4f}")
+                elif i > 0:
+                    print(f"    ▶ Lost by margin: {scored_images[0][0] - score:.4f}")
+                print()
             
-            if votes > 0:
-                print(f"    - Confidence: {conf:.4f} (stdev={tier_stab:.3f}, votes={votes}) → Contribution: {conf * (0.2 if similarity_ready else 0.4):.4f}")
-            else:
-                print(f"    - Confidence: {conf:.4f} (0 votes)")
-            
-            print(f"    - Recency: {recency} votes ago → Normalized: {recency_normalized:.4f} → Contribution: {recency_normalized * (0.3 if similarity_ready else 0.6):.4f}")
-            print(f"    - Overvote Penalty: ×{ov_mult:.4f}  → Final: {score:.4f}")
-            
-            if i == 0 and len(scored_images) > 1:
-                print(f"    ▶ Won by margin: {score - scored_images[1][0]:.4f}")
-            elif i > 0:
-                print(f"    ▶ Lost by margin: {scored_images[0][0] - score:.4f}")
-            print()
-        
-        print("=" * 60)
+            print("=" * 60)
 
         selected_right = scored_images[0][8]
 
         # --- CLIP concept + hybrid explanation for the selected pair ---
-        if similarity_ready:
+        if similarity_ready and _DEBUG_SELECTION:
             w_vis  = self.data_manager.algorithm_settings.sim_weight_visual
             w_tex  = self.data_manager.algorithm_settings.sim_weight_text
             w_tags = self.data_manager.algorithm_settings.sim_weight_tags
@@ -636,7 +584,7 @@ class RankingAlgorithm:
         
         # If we can't find any untested pairs, select the least recently tested pair
         # This is very rare - only happens when most/all pairs have been tested
-        print(f"Warning: All untested pairs exhausted, selecting least recently tested pair")
+        log.warning("All untested pairs exhausted, selecting least recently tested pair")
         
         # Get the two least recently tested images that aren't the exclude_pair
         for i, (score1, img1) in enumerate(image_recency_scores):
@@ -647,7 +595,7 @@ class RankingAlgorithm:
         # Final fallback (should be extremely rare)
         if len(active_images) >= 2:
             pair = [image_recency_scores[0][1], image_recency_scores[1][1]]
-            print(f"Final fallback: {pair[0]} vs {pair[1]}")
+            log.warning("Final fallback: %s vs %s", pair[0], pair[1])
             return pair[0], pair[1]
         
         return None, None
@@ -844,7 +792,7 @@ class RankingAlgorithm:
             return rankings
             
         except Exception as e:
-            print(f"Error calculating rankings: {e}")
+            log.error("Error calculating rankings: %s", e)
             return {
                 'current_tier': [],
                 'win_rate': [],

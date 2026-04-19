@@ -6,13 +6,16 @@ from typing import Optional, Tuple
 
 from config import Colors, Defaults
 from core.image_binner import ImageBinner
+from core.logging_setup import get_logger
+
+log = get_logger(__name__)
 
 
 class VotingController:
     """Handles voting logic and pair management for the main interface."""
     
     def __init__(self, parent: tk.Tk, data_manager, ranking_algorithm, image_processor, image_display):
-        print("VotingController: Initializing...")
+        log.debug("Initializing...")
         self.parent = parent
         self.data_manager = data_manager
         self.ranking_algorithm = ranking_algorithm
@@ -40,11 +43,11 @@ class VotingController:
         
         # Filter manager - will be set by main window
         self.filter_manager = None
-        print("VotingController: Initialization complete")
+        log.debug("Initialization complete")
     
     def create_vote_buttons(self, left_frame: tk.Frame, right_frame: tk.Frame) -> None:
         """Create vote buttons for both sides."""
-        print("VotingController: Creating vote buttons...")
+        log.debug("Creating vote buttons...")
         self.left_vote_button = tk.Button(
             left_frame, 
             text="Vote for this image (←)", 
@@ -75,14 +78,14 @@ class VotingController:
             lambda: self.vote('left'),
             lambda: self.vote('right')
         )
-        print("VotingController: Vote buttons created successfully")
+        log.debug("Vote buttons created successfully")
     
     def set_ui_references(self, status_bar: tk.Label, stats_label: tk.Label) -> None:
         """Set references to UI elements that need to be updated."""
-        print("VotingController: Setting UI references...")
+        log.debug("Setting UI references...")
         self.status_bar = status_bar
         self.stats_label = stats_label
-        print("VotingController: UI references set")
+        log.debug("UI references set")
     
     def set_vote_callback(self, callback) -> None:
         """Set callback function to be called after each vote."""
@@ -90,27 +93,27 @@ class VotingController:
     
     def set_filter_manager(self, filter_manager) -> None:
         """Set the filter manager for prompt-based filtering."""
-        print("VotingController: Setting filter manager...")
+        log.debug("Setting filter manager...")
         self.filter_manager = filter_manager
-        print("VotingController: Filter manager set")
+        log.debug("Filter manager set")
     
     def set_image_folder(self, folder_path: str) -> None:
         """Set the image folder and initialize the binner."""
-        print(f"VotingController: set_image_folder called with: {folder_path}")
+        log.debug("set_image_folder called with: %s", folder_path)
         try:
             if not folder_path:
-                print("VotingController: ERROR - Empty folder path received")
+                log.error("Empty folder path received")
                 return
             
             self.image_binner = ImageBinner(folder_path)
-            print(f"VotingController: Image binner initialized successfully for folder: {folder_path}")
+            log.debug("Image binner initialized successfully for folder: %s", folder_path)
             
             # Test if binner is working
             bin_folder_exists = self.image_binner.ensure_bin_folder_exists()
-            print(f"VotingController: Bin folder creation test: {bin_folder_exists}")
+            log.debug("Bin folder creation test: %s", bin_folder_exists)
             
         except Exception as e:
-            print(f"VotingController: ERROR initializing image binner: {e}")
+            log.error("Failed to initialize image binner: %s", e, exc_info=True)
             import traceback
             traceback.print_exc()
             self.image_binner = None
@@ -122,16 +125,16 @@ class VotingController:
         Press ↓ twice: next vote bins BOTH images.
         Press ↓ again: cancel, return to normal voting.
         """
-        print("VotingController: prepare_to_bin_next_loser called")
+        log.debug("prepare_to_bin_next_loser called")
 
         if not self.current_pair[0] or not self.current_pair[1]:
-            print("VotingController: No current pair available")
+            log.debug("No current pair available")
             if self.status_bar:
                 self.status_bar.config(text="No images available - load images first")
             return
 
         if not self.image_binner:
-            print("VotingController: ERROR - Image binner not initialized")
+            log.error("Image binner not initialized")
             if self.status_bar:
                 self.status_bar.config(
                     text="Error: Image binner not initialized - select a folder first")
@@ -139,7 +142,7 @@ class VotingController:
 
         # Advance through the three states
         self.bin_mode = (self.bin_mode + 1) % 3
-        print(f"VotingController: bin_mode → {self.bin_mode}")
+        log.debug("bin_mode → %d", self.bin_mode)
 
         if self.bin_mode == 1:
             if self.status_bar:
@@ -172,67 +175,43 @@ class VotingController:
         """
         Bin the loser from the last vote. This can be called after a normal vote.
         """
-        print("VotingController: bin_last_loser called")
+        log.debug("bin_last_loser called")
         
         if not self.last_vote_result:
-            print("VotingController: No last vote result available")
+            log.debug("No last vote result available")
             if self.status_bar:
                 self.status_bar.config(text="No recent vote to bin from - vote first, then press B to bin the loser")
             return
         
         if not self.image_binner:
-            print("VotingController: ERROR - Image binner not initialized")
+            log.error("Image binner not initialized")
             if self.status_bar:
                 self.status_bar.config(text="Error: Image binner not initialized - select a folder first")
             return
         
         winner, loser = self.last_vote_result
-        print(f"VotingController: Attempting to bin last loser: {loser} (winner was: {winner})")
+        log.debug("Attempting to bin last loser: %s (winner was: %s)", loser, winner)
         
-        # Check if already binned (compatible with existing data manager)
-        if hasattr(self.data_manager, 'is_image_binned'):
-            if self.data_manager.is_image_binned(loser):
-                print(f"VotingController: {loser} is already binned")
-                if self.status_bar:
-                    self.status_bar.config(text=f"{loser} is already binned")
-                return
-        elif hasattr(self.data_manager, 'binned_images'):
-            if loser in self.data_manager.binned_images:
-                print(f"VotingController: {loser} is already binned")
-                if self.status_bar:
-                    self.status_bar.config(text=f"{loser} is already binned")
-                return
+        # Check if already binned
+        if self.data_manager.is_image_binned(loser):
+            log.debug("%s is already binned", loser)
+            if self.status_bar:
+                self.status_bar.config(text=f"{loser} is already binned")
+            return
         
-        # Bin the loser (compatible with existing data manager)
-        success = False
-        if hasattr(self.data_manager, 'bin_image'):
-            success = self.data_manager.bin_image(loser)
-            print(f"VotingController: data_manager.bin_image result: {success}")
-        elif hasattr(self.data_manager, 'binned_images'):
-            if loser not in self.data_manager.binned_images:
-                self.data_manager.binned_images.add(loser)
-                success = True
-                print(f"VotingController: Added {loser} to binned_images set")
-        else:
-            # Create binned_images set if it doesn't exist
-            if not hasattr(self.data_manager, 'binned_images'):
-                self.data_manager.binned_images = set()
-                print("VotingController: Created new binned_images set")
-            self.data_manager.binned_images.add(loser)
-            success = True
-            print(f"VotingController: Added {loser} to new binned_images set")
+        # Bin the loser
+        success = self.data_manager.bin_image(loser)
+        log.debug("data_manager.bin_image result: %s", success)
         
         if success:
             # Purge votes involving the binned image from all active images
-            purge_result = None
-            if hasattr(self.data_manager, 'purge_binned_image_votes'):
-                purge_result = self.data_manager.purge_binned_image_votes(loser)
-                print(f"VotingController: Vote purge result: {purge_result}")
+            purge_result = self.data_manager.purge_binned_image_votes(loser)
+            log.debug("Vote purge result: %s", purge_result)
             
             # Move the physical file
-            print(f"VotingController: Attempting to move file {loser} to bin")
+            log.debug("Attempting to move file %s to bin", loser)
             move_success, error_msg = self.image_binner.move_image_to_bin(loser)
-            print(f"VotingController: File move result: {move_success}, error: {error_msg}")
+            log.debug("File move result: %s, error: %s", move_success, error_msg)
             
             if move_success:
                 # Update UI
@@ -247,17 +226,16 @@ class VotingController:
                         text=f"Binned: {loser} moved to Bin folder (last loser vs {winner}){purge_info}"
                     )
                 
-                print(f"VotingController: Successfully binned last loser: {loser}")
+                log.info("Successfully binned last loser: %s", loser)
             else:
                 # File move failed - remove from binned set
-                if hasattr(self.data_manager, 'binned_images'):
-                    self.data_manager.binned_images.discard(loser)
-                    print(f"VotingController: Removed {loser} from binned set due to file move failure")
+                self.data_manager.binned_images.discard(loser)
+                log.warning("Removed %s from binned set due to file move failure", loser)
                 if self.status_bar:
                     self.status_bar.config(text=f"Error binning image: {error_msg}")
-                print(f"VotingController: Failed to bin image: {error_msg}")
+                log.error("Failed to bin image: %s", error_msg)
         else:
-            print("VotingController: Failed to mark image as binned")
+            log.warning("Failed to mark image as binned")
             if self.status_bar:
                 self.status_bar.config(text="Failed to bin image")
     
@@ -294,7 +272,7 @@ class VotingController:
                     text=f"Votes: {votes} | Active: {active_count} | Binned: {binned_count}"
                 )
         except Exception as e:
-            print(f"VotingController: Error updating stats display: {e}")
+            log.error("Error updating stats display: %s", e)
     
     def show_next_pair(self) -> None:
         """Display the next pair of images for voting."""
@@ -302,7 +280,7 @@ class VotingController:
             return
         
         if self.left_vote_button is None or self.right_vote_button is None:
-            print("Warning: Vote buttons not created yet")
+            log.warning("Vote buttons not created yet")
             return
         
         images = self.image_processor.get_image_files(self.data_manager.image_folder)
@@ -327,7 +305,7 @@ class VotingController:
             return
         
         self.current_pair = (img1, img2)
-        print(f"VotingController: Showing new pair: {img1} vs {img2}")
+        log.debug("Showing new pair: %s vs %s", img1, img2)
         
         self.image_display.display_image(img1, 'left')
         self.image_display.display_image(img2, 'right')
@@ -341,13 +319,13 @@ class VotingController:
                 text="Vote for this image (← + BIN LOSER)", bg=Colors.BUTTON_WARNING)
             self.right_vote_button.config(
                 text="Vote for this image (→ + BIN LOSER)", bg=Colors.BUTTON_WARNING)
-            print("VotingController: Buttons set to bin-loser mode appearance")
+            log.debug("Buttons set to bin-loser mode appearance")
         elif self.bin_mode == 2:
             self.left_vote_button.config(
                 text="Vote (← + BIN BOTH)", bg=Colors.BUTTON_DANGER)
             self.right_vote_button.config(
                 text="Vote (→ + BIN BOTH)", bg=Colors.BUTTON_DANGER)
-            print("VotingController: Buttons set to bin-both mode appearance")
+            log.debug("Buttons set to bin-both mode appearance")
         else:
             self.left_vote_button.config(
                 text="Vote for this image (←)", bg=Colors.BUTTON_SUCCESS)
@@ -384,39 +362,39 @@ class VotingController:
     
     def vote(self, side: str) -> None:
         """Process a vote for the specified side, with optional binning."""
-        print(f"VotingController: Vote called for side: {side}")
+        log.debug("Vote called for side: %s", side)
         
         if not self.current_pair[0] or not self.current_pair[1]:
-            print("VotingController: No current pair available for voting")
+            log.debug("No current pair available for voting")
             return
         
         if self.left_vote_button is None or self.right_vote_button is None:
-            print("Warning: Vote buttons not created yet")
+            log.warning("Vote buttons not created yet")
             return
         
         winner = self.current_pair[0] if side == 'left' else self.current_pair[1]
         loser = self.current_pair[1] if side == 'left' else self.current_pair[0]
-        print(f"VotingController: Winner: {winner}, Loser: {loser}")
+        log.debug("Winner: %s, Loser: %s", winner, loser)
         
         self.data_manager.record_vote(winner, loser)
         
         # Store vote result for potential binning
         self.last_vote_result = (winner, loser)
-        print(f"VotingController: Vote recorded and stored for potential binning")
+        log.debug("Vote recorded and stored for potential binning")
         
         # Handle binning based on current bin_mode
         if self.bin_mode == 1:
-            print("VotingController: bin_mode=1, binning loser")
+            log.debug("bin_mode=1, binning loser")
             self._bin_loser_immediately(winner, loser)
             self.bin_mode = 0
             self._reset_button_appearance()
-            print("VotingController: Bin mode reset after use")
+            log.debug("Bin mode reset after use")
         elif self.bin_mode == 2:
-            print("VotingController: bin_mode=2, binning both images")
+            log.debug("bin_mode=2, binning both images")
             self._bin_both_immediately(winner, loser)
             self.bin_mode = 0
             self._reset_button_appearance()
-            print("VotingController: Bin-both mode reset after use")
+            log.debug("Bin-both mode reset after use")
         else:
             # Normal vote without binning
             self._update_stats_display()
@@ -434,52 +412,34 @@ class VotingController:
     
     def _bin_loser_immediately(self, winner: str, loser: str) -> None:
         """Bin the loser immediately after a vote."""
-        print(f"VotingController: _bin_loser_immediately called for {loser}")
+        log.debug("_bin_loser_immediately called for %s", loser)
         
         if not self.image_binner:
-            print("VotingController: ERROR - Image binner not initialized")
+            log.error("Image binner not initialized")
             if self.status_bar:
                 self.status_bar.config(text="Error: Image binner not initialized")
             return
         
-        # Bin the loser (compatible with existing data manager)
-        success = False
-        if hasattr(self.data_manager, 'bin_image'):
-            success = self.data_manager.bin_image(loser)
-            print(f"VotingController: data_manager.bin_image result: {success}")
-        elif hasattr(self.data_manager, 'binned_images'):
-            if not hasattr(self.data_manager.binned_images, '__contains__'):
-                self.data_manager.binned_images = set()
-            if loser not in self.data_manager.binned_images:
-                self.data_manager.binned_images.add(loser)
-                success = True
-                print(f"VotingController: Added {loser} to binned_images set")
-        else:
-            # Create binned_images set if it doesn't exist
-            if not hasattr(self.data_manager, 'binned_images'):
-                self.data_manager.binned_images = set()
-                print("VotingController: Created new binned_images set")
-            self.data_manager.binned_images.add(loser)
-            success = True
-            print(f"VotingController: Added {loser} to new binned_images set")
+        # Bin the loser
+        success = self.data_manager.bin_image(loser)
+        log.debug("data_manager.bin_image result: %s", success)
         
         if success:
             # Purge votes involving the binned image from all active images
-            if hasattr(self.data_manager, 'purge_binned_image_votes'):
-                purge_result = self.data_manager.purge_binned_image_votes(loser)
-                print(f"VotingController: Vote purge result: {purge_result}")
+            purge_result = self.data_manager.purge_binned_image_votes(loser)
+            log.debug("Vote purge result: %s", purge_result)
             
             # Move the physical file
-            print(f"VotingController: Attempting to move file {loser} to bin")
+            log.debug("Attempting to move file %s to bin", loser)
             move_success, error_msg = self.image_binner.move_image_to_bin(loser)
-            print(f"VotingController: File move result: {move_success}, error: {error_msg}")
+            log.debug("File move result: %s, error: %s", move_success, error_msg)
             
             if move_success:
                 # Update UI
                 self._update_stats_display()
                 
                 purge_info = ""
-                if hasattr(self.data_manager, 'purge_binned_image_votes') and purge_result:
+                if purge_result:
                     purge_info = f" | Purged {purge_result['total_votes_removed']} vote(s) from {purge_result['affected_images']} image(s)"
                 
                 if self.status_bar:
@@ -487,17 +447,16 @@ class VotingController:
                         text=f"Vote + Bin: {winner} beats {loser} → {loser} binned{purge_info}"
                     )
                 
-                print(f"VotingController: Vote and bin successful: {winner} beats {loser}, {loser} binned")
+                log.info("Vote and bin successful: %s beats %s, %s binned", winner, loser, loser)
             else:
                 # File move failed - remove from binned set
-                if hasattr(self.data_manager, 'binned_images'):
-                    self.data_manager.binned_images.discard(loser)
-                    print(f"VotingController: Removed {loser} from binned set due to file move failure")
+                self.data_manager.binned_images.discard(loser)
+                log.warning("Removed %s from binned set due to file move failure", loser)
                 if self.status_bar:
                     self.status_bar.config(text=f"Vote recorded but binning failed: {error_msg}")
-                print(f"VotingController: Vote succeeded but binning failed: {error_msg}")
+                log.error("Vote succeeded but binning failed: %s", error_msg)
         else:
-            print("VotingController: Failed to mark image as binned")
+            log.warning("Failed to mark image as binned")
             if self.status_bar:
                 self.status_bar.config(text=f"Vote recorded but {loser} was already binned")
     
@@ -522,7 +481,7 @@ class VotingController:
           3. Move files. If a file move fails, only that image's bin mark is
              reversed (the other image stays binned and its purge already ran).
         """
-        print(f"VotingController: _bin_both_immediately: {winner} and {loser}")
+        log.debug("_bin_both_immediately: %s and %s", winner, loser)
 
         if not self.image_binner:
             if self.status_bar:
@@ -532,19 +491,12 @@ class VotingController:
         # Step 1 — Mark BOTH as binned atomically before any purge runs.
         marked = []
         for image in (winner, loser):
-            if hasattr(self.data_manager, 'bin_image'):
-                success = self.data_manager.bin_image(image)
-            else:
-                if not hasattr(self.data_manager, 'binned_images'):
-                    self.data_manager.binned_images = set()
-                success = image not in self.data_manager.binned_images
-                if success:
-                    self.data_manager.binned_images.add(image)
+            success = self.data_manager.bin_image(image)
             if success:
                 marked.append(image)
-                print(f"VotingController: Marked {image} as binned")
+                log.debug("Marked %s as binned", image)
             else:
-                print(f"VotingController: {image} was already binned, skipping")
+                log.debug("%s was already binned, skipping", image)
 
         if not marked:
             if self.status_bar:
@@ -556,9 +508,8 @@ class VotingController:
         # them is safely skipped by purge_binned_image_votes — no interleaving
         # needed. Every remaining active image is cleaned correctly.
         for image in marked:
-            if hasattr(self.data_manager, 'purge_binned_image_votes'):
-                result = self.data_manager.purge_binned_image_votes(image)
-                print(f"VotingController: Purged {image}: {result}")
+            result = self.data_manager.purge_binned_image_votes(image)
+            log.debug("Purged %s: %s", image, result)
 
         # Step 3 — Move files physically.
         binned, errors = [], []
@@ -566,15 +517,14 @@ class VotingController:
             move_ok, err = self.image_binner.move_image_to_bin(image)
             if move_ok:
                 binned.append(image)
-                print(f"VotingController: Moved {image} to Bin")
+                log.info("Moved %s to Bin", image)
             else:
                 # File move failed — reverse only this image's bin mark.
                 # Its votes were already purged from active images, which is
                 # an acceptable trade-off vs. leaving stale data in the pool.
-                if hasattr(self.data_manager, 'binned_images'):
-                    self.data_manager.binned_images.discard(image)
+                self.data_manager.binned_images.discard(image)
                 errors.append(f"{image}: {err}")
-                print(f"VotingController: File move failed for {image}: {err}")
+                log.error("File move failed for %s: %s", image, err)
 
         self._update_stats_display()
 
@@ -596,7 +546,7 @@ class VotingController:
     
     def setup_keyboard_shortcuts(self) -> None:
         """Setup keyboard shortcuts for voting and binning."""
-        print("VotingController: Setting up keyboard shortcuts...")
+        log.debug("Setting up keyboard shortcuts...")
         
         # Hardcoded key bindings to avoid import issues
         VOTE_LEFT = ['<Left>', '<a>']
@@ -605,27 +555,27 @@ class VotingController:
         
         for key in VOTE_LEFT:
             self.parent.bind(key, lambda e: self.vote('left') if self.left_vote_button and self.left_vote_button['state'] == tk.NORMAL else None)
-            print(f"VotingController: Bound key {key} to vote left")
+            log.debug("Bound key %s to vote left", key)
         
         for key in VOTE_RIGHT:
             self.parent.bind(key, lambda e: self.vote('right') if self.right_vote_button and self.right_vote_button['state'] == tk.NORMAL else None)
-            print(f"VotingController: Bound key {key} to vote right")
+            log.debug("Bound key %s to vote right", key)
         
         # Binning shortcut - toggle bin mode for next vote
         for key in BIN_LOSER:
             self.parent.bind(key, lambda e: self.prepare_to_bin_next_loser())
-            print(f"VotingController: Bound key {key} to prepare_to_bin_next_loser")
+            log.debug("Bound key %s to prepare_to_bin_next_loser", key)
         
         # Alternative binning keys - bin last loser retroactively
         self.parent.bind('<b>', lambda e: self.bin_last_loser())
         self.parent.bind('<B>', lambda e: self.bin_last_loser())
-        print("VotingController: Bound B/b keys to bin_last_loser")
+        log.debug("Bound B/b keys to bin_last_loser")
         
-        print("VotingController: Keyboard shortcuts setup complete")
+        log.debug("Keyboard shortcuts setup complete")
     
     def reset_voting_state(self) -> None:
         """Reset voting state when loading new images."""
-        print("VotingController: Resetting voting state...")
+        log.debug("Resetting voting state...")
         self.current_pair = (None, None)
         self.next_pair = (None, None)
         self.previous_pair = (None, None)
@@ -640,13 +590,13 @@ class VotingController:
         if self.status_bar:
             self.status_bar.config(text="Select a folder to begin")
         
-        print("VotingController: Voting state reset complete")
+        log.debug("Voting state reset complete")
     
     def cleanup(self) -> None:
         """Clean up resources."""
-        print("VotingController: Cleaning up...")
+        log.debug("Cleaning up...")
         if self.preload_timer:
             self.parent.after_cancel(self.preload_timer)
         
         self.reset_voting_state()
-        print("VotingController: Cleanup complete")
+        log.debug("Cleanup complete")
