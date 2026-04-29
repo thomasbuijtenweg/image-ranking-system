@@ -10,6 +10,8 @@ from core.weight_manager import WeightManager
 from core.data_persistence import DataPersistence
 from core.algorithm_settings import AlgorithmSettings
 from core.similarity_manager import SimilarityManager
+from core.binning_service import BinningService
+from core.cutline_service import CutlineService
 from core.logging_setup import get_logger
 
 log = get_logger(__name__)
@@ -23,7 +25,22 @@ class DataManager:
         self.data_persistence = DataPersistence()
         self.algorithm_settings = AlgorithmSettings()
         self.similarity_manager = SimilarityManager()
+        self.binning = BinningService(self)
+        self.cutline = CutlineService(self)
         self.reset_data()
+    
+    # binned_images is owned by BinningService; expose it here as a property
+    # so existing callers that read or write data_manager.binned_images
+    # continue to work transparently during the refactor.
+    @property
+    def binned_images(self) -> set:
+        return self.binning.binned_images
+    
+    @binned_images.setter
+    def binned_images(self, value) -> None:
+        # Coerce to set in case a list or other iterable is assigned
+        # (e.g. load paths that pass in the raw JSON-parsed list).
+        self.binning.binned_images = value if isinstance(value, set) else set(value)
     
     def reset_data(self):
         """Reset all data to initial state."""
@@ -31,296 +48,49 @@ class DataManager:
         self.vote_count = 0
         self.image_stats = {}
         self.metadata_cache = {}
-        self.binned_images = set()  # Track binned image filenames
+        self.binning.binned_images = set()  # Track binned image filenames
         self.weight_manager.reset_to_defaults()
         self.algorithm_settings.reset_to_defaults()
     
     def bin_image(self, image_name: str) -> bool:
-        """
-        Mark an image as binned and remove it from active ranking.
-        
-        Args:
-            image_name: Name of the image to bin
-            
-        Returns:
-            True if successfully binned, False if already binned
-        """
-        if image_name in self.binned_images:
-            return False
-        
-        self.binned_images.add(image_name)
-        log.info("Image '%s' has been binned", image_name)
-        return True
+        """Delegate: mark an image as binned. Returns False if already binned."""
+        return self.binning.bin_image(image_name)
     
     def purge_binned_image_votes(self, binned_image: str, verbose: bool = True) -> Dict[str, Any]:
-        """
-        Remove all vote history involving a binned image from active images.
-        
-        For every active (non-binned) image that was previously compared against
-        the binned image, this method:
-        - Removes all matchup_history entries involving the binned image
-        - Removes the binned image from tested_against
-        - Recalculates wins, losses, votes from remaining matchup history
-        - Replays tier progression from the remaining matchup history
-        
-        Args:
-            binned_image: Name of the image that was binned
-            
-        Returns:
-            Dict with purge statistics
-        """
-        affected_images = 0
-        total_votes_removed = 0
-        
-        for img_name, stats in self.image_stats.items():
-            # Skip the binned image itself and any other binned images
-            if img_name == binned_image or img_name in self.binned_images:
-                continue
-            
-            # Check if this image has any matchup history with the binned image
-            matchup_history = stats.get('matchup_history', [])
-            original_len = len(matchup_history)
-            
-            # Filter out all matchups involving the binned image
-            filtered_history = [
-                (opponent, won, vote_num) for opponent, won, vote_num in matchup_history
-                if opponent != binned_image
-            ]
-            
-            votes_removed = original_len - len(filtered_history)
-            if votes_removed == 0:
-                continue
-            
-            affected_images += 1
-            total_votes_removed += votes_removed
-            
-            # Remove binned image from tested_against
-            tested_against = stats.get('tested_against', set())
-            if isinstance(tested_against, set):
-                tested_against.discard(binned_image)
-            elif isinstance(tested_against, list):
-                stats['tested_against'] = set(t for t in tested_against if t != binned_image)
-            
-            # Recalculate stats from the filtered matchup history
-            new_wins = sum(1 for _, won, _ in filtered_history if won)
-            new_losses = sum(1 for _, won, _ in filtered_history if not won)
-            new_votes = new_wins + new_losses
-            
-            # Replay tier progression from scratch
-            new_tier = 0
-            new_tier_history = [0]
-            for _, won, _ in filtered_history:
-                new_tier += 1 if won else -1
-                new_tier_history.append(new_tier)
-            
-            # Capture old tier before overwriting
-            old_tier = stats['current_tier']
-            
-            # Apply recalculated values
-            stats['matchup_history'] = filtered_history
-            stats['wins'] = new_wins
-            stats['losses'] = new_losses
-            stats['votes'] = new_votes
-            stats['current_tier'] = new_tier
-            stats['tier_history'] = new_tier_history
-            
-            if verbose:
-                log.debug("  Purged %d vote(s) involving '%s' from '%s' (tier: %s -> %s)",
-                         votes_removed, binned_image, img_name, old_tier, new_tier)
-        
-        if verbose:
-            log.info("Vote purge complete for '%s': %d images affected, %d votes removed",
-                     binned_image, affected_images, total_votes_removed)
-        
-        return {
-            'affected_images': affected_images,
-            'total_votes_removed': total_votes_removed
-        }
+        """Delegate: remove all vote history involving a binned image from active images."""
+        return self.binning.purge_binned_image_votes(binned_image, verbose=verbose)
     
     def purge_all_binned_image_votes(self) -> Dict[str, Any]:
-        """
-        Purge stale votes for all currently binned images.
-        
-        Cleans up save files where images were binned before the vote-purge
-        feature existed. Idempotent - safe to run multiple times.
-        
-        Returns:
-            Dict with purge statistics
-        """
-        if not self.binned_images:
-            log.info("No binned images found - nothing to purge")
-            return {'total_affected': 0, 'total_removed': 0, 'binned_processed': 0}
-
-        total_affected = 0
-        total_removed = 0
-        n_binned = len(self.binned_images)
-        # For bulk purges, emit a single progress line every ~20 images
-        # instead of per-image spam. Threshold chosen so small datasets
-        # still show per-image output for debugging.
-        quiet = n_binned > 20
-        progress_step = max(1, n_binned // 10)  # ~10 updates across the run
-
-        for idx, binned_image in enumerate(list(self.binned_images)):
-            # Check if any active image still has matchup history with this binned image
-            has_stale_votes = any(
-                binned_image in [opp for opp, _, _ in stats.get('matchup_history', [])]
-                for img_name, stats in self.image_stats.items()
-                if img_name != binned_image and img_name not in self.binned_images
-            )
-
-            if has_stale_votes:
-                result = self.purge_binned_image_votes(binned_image, verbose=not quiet)
-                total_affected += result['affected_images']
-                total_removed += result['total_votes_removed']
-
-            if quiet and (idx + 1) % progress_step == 0:
-                log.debug("  [Purge] ...processed %d/%d binned images (%d votes removed so far)",
-                          idx + 1, n_binned, total_removed)
-
-        if total_removed > 0:
-            log.info("Purge complete: %d stale vote(s) removed from %d image(s) across %d binned image(s)",
-                     total_removed, total_affected, n_binned)
-        else:
-            log.info("Purge complete: no stale votes found (already clean)")
-
-        return {
-            'total_affected': total_affected,
-            'total_removed': total_removed,
-            'binned_processed': n_binned
-        }
+        """Delegate: purge stale votes for all currently binned images."""
+        return self.binning.purge_all_binned_image_votes()
     
     def export_top_images(self, n: int) -> list:
-        """Identify and prepare the top N images for export (full reset).
-
-        Operation order is critical for correctness when exported images have
-        voted against each other:
-
-        1. Sort active images by tier (then wins as tiebreak), take top N.
-        2. Mark ALL of them as binned atomically — before any purge runs.
-           This ensures that when we purge image A's votes, image B (also
-           exported) is already in binned_images and is safely skipped by
-           purge_binned_image_votes(), preventing cross-vote corrections from
-           distorting each other.
-        3. Purge each exported image's vote history from the remaining active
-           images in sequence.
-        4. Fully wipe the exported images from image_stats, metadata_cache,
-           and binned_images — as if they were never in the system.
-        5. Return the list of filenames so the caller can move the files.
-
-        Args:
-            n: Number of top-ranked images to export.
-
-        Returns:
-            List of image filenames that were prepared for export.
-        """
-        active = self.get_active_images()
-        if not active:
-            return []
-
-        n = min(n, len(active))
-
-        # Step 1: Sort by tier desc, wins desc as tiebreak
-        sorted_active = sorted(
-            active,
-            key=lambda img: (
-                self.image_stats[img].get('current_tier', 0),
-                self.image_stats[img].get('wins', 0)
-            ),
-            reverse=True
-        )
-        to_export = sorted_active[:n]
-
-        log.info("[Export] Preparing to export top %d image(s)...", len(to_export))
-        for img in to_export:
-            tier  = self.image_stats[img].get('current_tier', 0)
-            votes = self.image_stats[img].get('votes', 0)
-            wins  = self.image_stats[img].get('wins', 0)
-            log.debug("  %s  (tier=%s, votes=%s, wins=%s)", img, tier, votes, wins)
-
-        # Step 2: Mark ALL as binned atomically before any purge
-        for img in to_export:
-            self.bin_image(img)
-        log.info("[Export] Marked %d image(s) as binned.", len(to_export))
-
-        # Step 3: Purge each exported image's votes from remaining active images
-        total_votes_removed = 0
-        for img in to_export:
-            result = self.purge_binned_image_votes(img)
-            total_votes_removed += result['total_votes_removed']
-        log.info("[Export] Vote purge complete — %d vote(s) removed from active images.", total_votes_removed)
-
-        # Step 4: Full wipe — remove from all data structures
-        for img in to_export:
-            self.image_stats.pop(img, None)
-            self.binned_images.discard(img)
-            self.metadata_cache.pop(img, None)
-        log.info("[Export] Wiped %d image(s) from data. Export ready.", len(to_export))
-
-        return to_export
+        """Delegate: prepare the top N images for export (full reset)."""
+        return self.binning.export_top_images(n)
 
     def export_specific_images(self, names: list) -> list:
-        """Export a caller-supplied list of images (full reset).
-
-        Same atomic bin-all → purge → wipe sequence as export_top_images,
-        but the caller decides which images to include (e.g. after the user
-        has toggled images in the preview window).
-
-        Returns the list of names that were actually processed (skips any
-        name not in image_stats or already binned).
-        """
-        active_set = set(self.get_active_images())
-        to_export = [n for n in names if n in active_set]
-
-        if not to_export:
-            log.info("[Export] No valid images to export.")
-            return []
-
-        log.info("[Export] Exporting %d selected image(s)...", len(to_export))
-        for img in to_export:
-            tier  = self.image_stats[img].get('current_tier', 0)
-            votes = self.image_stats[img].get('votes', 0)
-            wins  = self.image_stats[img].get('wins', 0)
-            log.debug("  %s  (tier=%s, votes=%s, wins=%s)", img, tier, votes, wins)
-
-        # Step 1: Mark ALL as binned atomically before any purge
-        for img in to_export:
-            self.bin_image(img)
-
-        # Step 2: Purge votes from remaining active images
-        total_removed = 0
-        for img in to_export:
-            result = self.purge_binned_image_votes(img)
-            total_removed += result['total_votes_removed']
-        log.info("[Export] Vote purge complete — %d vote(s) removed.", total_removed)
-
-        # Step 3: Full wipe
-        for img in to_export:
-            self.image_stats.pop(img, None)
-            self.binned_images.discard(img)
-            self.metadata_cache.pop(img, None)
-        log.info("[Export] Wiped %d image(s) from data.", len(to_export))
-
-        return to_export
+        """Delegate: export a caller-supplied list of images (full reset)."""
+        return self.binning.export_specific_images(names)
 
     def is_image_binned(self, image_name: str) -> bool:
-        """Check if an image is binned."""
-        return image_name in self.binned_images
+        """Delegate: check if an image is binned."""
+        return self.binning.is_image_binned(image_name)
     
     def get_active_images(self) -> list:
         """Get list of active (non-binned) image names."""
         return [img for img in self.image_stats.keys() if img not in self.binned_images]
     
     def get_binned_images(self) -> list:
-        """Get list of binned image names."""
-        return list(self.binned_images)
+        """Delegate: get list of binned image names."""
+        return self.binning.get_binned_images()
     
     def get_active_image_count(self) -> int:
         """Get count of active (non-binned) images."""
         return len(self.get_active_images())
     
     def get_binned_image_count(self) -> int:
-        """Get count of binned images."""
-        return len(self.binned_images)
+        """Delegate: get count of binned images."""
+        return self.binning.get_binned_image_count()
     
     def has_pair_been_tested(self, img1: str, img2: str) -> bool:
         """Check if two images have already been tested against each other."""
@@ -554,130 +324,24 @@ class DataManager:
     # ------------------------------------------------------------------
 
     def get_cutline_tier(self) -> Optional[int]:
-        """Return the tier value at the cutline position.
-
-        The cutline tier T is the tier of the image that sits at position
-        target_count when all active images are sorted by tier descending.
-        Returns None when target_count is 0 (disabled) or the dataset is
-        smaller than target_count.
-        """
-        target = self.algorithm_settings.target_count
-        if target == 0:
-            return None
-        active = self.get_active_images()
-        if len(active) < target:
-            return None
-        sorted_by_tier = sorted(
-            active,
-            key=lambda img: self.image_stats[img].get('current_tier', 0),
-            reverse=True
-        )
-        return self.image_stats[sorted_by_tier[target - 1]].get('current_tier', 0)
+        """Delegate: return the tier value at the cutline position."""
+        return self.cutline.get_cutline_tier()
 
     def _get_zone_min_votes(self, tier_distance: int) -> int:
-        """Return the minimum votes required to confirm an image at tier_distance from cutline."""
-        base  = self.algorithm_settings.zone_base_votes
-        per_t = self.algorithm_settings.zone_votes_per_tier
-        return max(1, base + round(tier_distance * per_t))
+        """Delegate: min votes required to confirm an image at `tier_distance` from cutline."""
+        return self.cutline._get_zone_min_votes(tier_distance)
 
     def get_zone(self, image_name: str, cutline: Optional[int] = None) -> str:
-        """Classify an image into a cutline zone.
-
-        Returns one of:
-          'eliminated'    – image is binned
-          'disabled'      – target_count == 0 (cutline system off)
-          'confirmed_in'  – tier >= cutline + buffer AND enough votes
-          'confirmed_out' – tier <= cutline - (buffer + extra) AND enough votes
-          'boundary'      – everything else (near cutline, or too few votes)
-
-        PERFORMANCE: Callers that classify many images in a row should call
-        get_cutline_tier() ONCE and pass the result in via the `cutline`
-        parameter. When `cutline` is None, it is computed internally —
-        but that internal call is O(N log N), so doing it per-image creates
-        an O(N² log N) loop. Passing the precomputed value avoids that.
-
-        Fix A — Hard minimum vote gate:
-          No image can be confirmed_out until it has at least
-          min_votes_before_cut votes. This prevents unlucky early
-          matchups from sending low-vote images out of the pool.
-
-        Fix B — Confidence-weighted extra tier buffer:
-          Images that have JUST cleared the minimum threshold still
-          carry an extra tier buffer that shrinks linearly to 0 as
-          votes climb from min_votes_before_cut to 2× that value.
-          This means a fresh image must be further below the cutline
-          before it can be confirmed_out, even if it technically has
-          enough votes to qualify.
-        """
-        if self.is_image_binned(image_name):
-            return 'eliminated'
-        if cutline is None:
-            cutline = self.get_cutline_tier()
-        if cutline is None:
-            return 'disabled'
-        stats  = self.get_image_stats(image_name)
-        tier   = stats.get('current_tier', 0)
-        votes  = stats.get('votes', 0)
-        buffer = self.algorithm_settings.cutline_buffer_tiers
-        min_cut_votes = self.algorithm_settings.min_votes_before_cut
-
-        # --- Fix A: hard gate ---
-        # Images below the threshold are never confirmed_out.
-        # (confirmed_in is still allowed — a dominant image can be confirmed
-        # in early since that direction only helps it, not harms it.)
-        if votes < min_cut_votes:
-            # Can still be confirmed_in if well above cutline
-            if tier >= cutline + buffer:
-                min_v = self._get_zone_min_votes(tier - cutline)
-                if votes >= min_v:
-                    return 'confirmed_in'
-            return 'boundary'
-
-        # --- Fix B: graduated extra out-buffer for recently-eligible images ---
-        # Between min_cut_votes and 2× min_cut_votes the extra buffer shrinks
-        # from cutline_buffer_tiers → 0 (linear).
-        full_confidence_votes = min_cut_votes * 2
-        if votes < full_confidence_votes:
-            maturity = (votes - min_cut_votes) / max(full_confidence_votes - min_cut_votes, 1)
-            extra_out_buffer = round(buffer * (1.0 - maturity))
-        else:
-            extra_out_buffer = 0
-
-        effective_out_buffer = buffer + extra_out_buffer
-
-        if tier >= cutline + buffer:
-            min_v = self._get_zone_min_votes(tier - cutline)
-            if votes >= min_v:
-                return 'confirmed_in'
-        elif tier <= cutline - effective_out_buffer:
-            min_v = self._get_zone_min_votes(cutline - tier)
-            if votes >= min_v:
-                return 'confirmed_out'
-        return 'boundary'
+        """Delegate: classify an image into a cutline zone."""
+        return self.cutline.get_zone(image_name, cutline=cutline)
 
     def get_zone_counts(self) -> Dict[str, Any]:
-        """Return a dict of zone counts and cutline metadata."""
-        counts = {'confirmed_in': 0, 'boundary': 0, 'confirmed_out': 0,
-                  'eliminated': 0, 'disabled': 0}
-        # Compute cutline ONCE (it's O(N log N)) and reuse for every image.
-        cutline = self.get_cutline_tier()
-        for img in self.image_stats:
-            zone = self.get_zone(img, cutline=cutline)
-            counts[zone] = counts.get(zone, 0) + 1
-        counts['cutline_tier']  = cutline
-        counts['target_count']  = self.algorithm_settings.target_count
-        counts['total_active']  = self.get_active_image_count()
-        return counts
+        """Delegate: return a dict of zone counts and cutline metadata."""
+        return self.cutline.get_zone_counts()
 
     def get_progress_summary(self) -> Dict[str, Any]:
-        """Return zone counts plus resolution percentage."""
-        counts    = self.get_zone_counts()
-        resolved  = counts['confirmed_in'] + counts['confirmed_out'] + counts['eliminated']
-        total     = counts['total_active'] + counts['eliminated']
-        resolution = (resolved / total * 100.0) if total > 0 else 0.0
-        counts['resolved']       = resolved
-        counts['resolution_pct'] = round(resolution, 1)
-        return counts
+        """Delegate: return zone counts plus resolution percentage."""
+        return self.cutline.get_progress_summary()
 
     def get_tier_distribution(self) -> Dict[int, int]:
         """Get the distribution of ACTIVE images across tiers."""
